@@ -53,7 +53,11 @@
 │   ├── schemas.py      # 两套接口契约
 │   ├── service.py      # 写入、混合检索、阈值过滤
 │   └── storage.py      # SQLite、幂等、user_id 隔离
+├── scripts/
+│   ├── generate_benchmark.py # 用 DeepSeek 生成严格校验的合成数据
+│   └── run_benchmark.py      # 只通过 /set、/get 执行批量评测
 ├── tests/test_api.py
+├── tests/test_benchmark_tools.py
 ├── .env.example
 ├── Dockerfile
 ├── pytest.ini
@@ -206,7 +210,61 @@ python -m pytest
 - Add 重试幂等与冲突检测；
 - 可选 Bearer API Key 和无鉴权 Health。
 
-## 6. Docker
+## 6. 使用 DeepSeek 生成 200 条合成数据并批量测试
+
+生成器始终读取 `.env` 中的 `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL` 和
+`DEEPSEEK_MODEL`，与服务当前的 `LLM_PROVIDER` 无关。因此服务可以继续使用 RightCode，
+同时单独使用 DeepSeek 生成测试数据。默认生成 180 条正例和 20 条负例：
+
+```powershell
+python -m scripts.generate_benchmark `
+  --count 200 `
+  --negative-count 20 `
+  --batch-size 20 `
+  --output data/benchmark_200.jsonl
+```
+
+生成器会严格检查：正例答案必须逐字存在于记忆中、不得直接泄漏在 query 中；负例必须没有答案；
+重复的记忆、query 和答案会被丢弃并自动补齐。所有内容都要求是虚构合成数据。默认约需 10 个
+DeepSeek 批次请求，实际请求数取决于模型输出通过校验的比例。
+
+建议为批量测试使用独立数据库。在启动服务的 PowerShell 窗口中执行：
+
+```powershell
+$env:DATABASE_PATH="data/benchmark_run.db"
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+然后在另一个 PowerShell 窗口执行：
+
+```powershell
+python -m scripts.run_benchmark `
+  --dataset data/benchmark_200.jsonl `
+  --base-url http://127.0.0.1:8000 `
+  --top-k 5 `
+  --concurrency 4 `
+  --min-recall 0.90 `
+  --max-negative-fpr 0.20 `
+  --report data/benchmark_report.json
+```
+
+运行器只使用官网格式的 `/set`、`/get` HTTP 请求，不读取 SQLite。它会先完成全部写入，再完成全部
+查询，并输出：
+
+- Set/Search 成功率和失败样例 ID；
+- Recall@1、Recall@5、MRR@5；
+- 负例误召回率；
+- Set/Get 延迟的 p50、p95 和最大值。
+
+每次运行自动生成新的 `run_id` 和用户隔离空间，不会检索到之前运行的数据。当前配置同时开启
+`LLM_ADD_ENRICHMENT` 与 `LLM_SEARCH_EXPANSION` 时，200 条测试会产生约 200 次写入 LLM 调用和
+200 次查询 LLM 调用。若网关限流，可把 `--concurrency` 降为 1 或 2。保持
+`LLM_FAILURE_MODE=strict`，否则上游失败可能被本地回退掩盖，导致测试结论失真。
+
+数据集、独立数据库和报告都位于已被 Git 忽略的 `data/` 目录。不要使用真实个人信息、比赛隐藏样本
+或已知金标生成测试数据；合成测试结果也不能替代 AgentMemory 官方评测。
+
+## 7. Docker
 
 ```powershell
 docker build -t agent-memory-api .
@@ -215,7 +273,7 @@ docker run --rm -p 8000:8000 --env-file .env -v "${PWD}/data:/app/data" agent-me
 
 必须挂载 `/app/data`，否则容器删除后 SQLite 记忆和模型缓存都会丢失。
 
-## 7. ngrok 公网调试
+## 8. ngrok 公网调试
 
 服务启动后另开终端：
 
