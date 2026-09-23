@@ -39,6 +39,8 @@ class StoredMemory:
     search_text: str
     embedding: NDArray[np.float32]
     created_at: str
+    # 消息自带的事件时间（毫秒时间戳）；缺失时为 None，检索端回退解析 created_at。
+    source_timestamp: int | None = None
 
 
 class SQLiteMemoryStore:
@@ -256,7 +258,8 @@ class SQLiteMemoryStore:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT id, content, search_text, embedding, embedding_dim, created_at
+                SELECT id, content, search_text, embedding, embedding_dim,
+                       created_at, source_timestamp
                 FROM memories
                 WHERE user_id = ?
                 ORDER BY created_at DESC, id ASC
@@ -277,6 +280,7 @@ class SQLiteMemoryStore:
                     search_text=row["search_text"],
                     embedding=vector,
                     created_at=row["created_at"],
+                    source_timestamp=row["source_timestamp"],
                 )
             )
         return output

@@ -44,6 +44,17 @@ class Settings(BaseSettings):
     max_top_k: int = Field(default=100, ge=1, le=1000)
     candidate_pool_size: int = Field(default=400, ge=1, le=10000)
 
+    # 时间感知检索：LLM 只抽取相对时间约束，绝对窗口由确定性代码解析。
+    # off/soft/strict：soft 加权参与打分；strict 在窗口内候选足够时截掉窗口外记录。
+    temporal_mode: Literal["off", "soft", "strict"] = "soft"
+    temporal_weight: float = Field(default=0.20, ge=0.0, le=1.0)
+    temporal_decay_half_life_days: float = Field(
+        default=30.0, gt=0.0, le=3650.0
+    )
+    temporal_event_anchor_min_score: float = Field(
+        default=0.30, ge=0.0, le=1.0
+    )
+
     # 简化 /set、/get 接口没有 user_id，统一放入此本地隔离空间。
     local_user_id: str = Field(default="local-default", min_length=1, max_length=256)
     max_memory_chars: int = Field(default=200_000, ge=1, le=2_000_000)
@@ -83,3 +94,19 @@ class Settings(BaseSettings):
             # 避免错误配置导致所有相关性分数失真。
             return 1.0, 0.0
         return self.semantic_weight / total, self.lexical_weight / total
+
+    @property
+    def normalized_temporal_weights(self) -> tuple[float, float, float]:
+        """(语义, 词法, 时间) 三路权重，仅在检索存在有效时间窗口时使用。"""
+        total = (
+            self.semantic_weight
+            + self.lexical_weight
+            + self.temporal_weight
+        )
+        if total <= 0:
+            return 1.0, 0.0, 0.0
+        return (
+            self.semantic_weight / total,
+            self.lexical_weight / total,
+            self.temporal_weight / total,
+        )

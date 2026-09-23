@@ -6,10 +6,20 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from app.config import Settings
+from app.prompts import ADD_ENRICHMENT_PROMPT_V2, QUERY_EXPANSION_PROMPT_V3
+from app.temporal import TemporalConstraints, parse_temporal
 
 
 class LLMError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class QueryExpansion:
+    """查询扩展结果：检索辅助文本 + 受控解析后的时间约束。"""
+
+    text: str
+    temporal: TemporalConstraints | None
 
 
 class MemoryLLM(Protocol):
@@ -18,8 +28,8 @@ class MemoryLLM(Protocol):
     def enrich_messages(self, messages: list[dict[str, object]]) -> dict[int, str]:
         """为原始消息生成仅用于索引的检索增强文本。"""
 
-    def expand_query(self, query: str, options: list[str] | None) -> str:
-        """扩展查询表达，但不能生成问题最终答案。"""
+    def expand_query(self, query: str, options: list[str] | None) -> QueryExpansion:
+        """扩展查询表达并抽取时间约束，但不能生成问题最终答案。"""
 
 
 class NoOpMemoryLLM:
@@ -28,8 +38,8 @@ class NoOpMemoryLLM:
     def enrich_messages(self, messages: list[dict[str, object]]) -> dict[int, str]:
         return {}
 
-    def expand_query(self, query: str, options: list[str] | None) -> str:
-        return ""
+    def expand_query(self, query: str, options: list[str] | None) -> QueryExpansion:
+        return QueryExpansion(text="", temporal=None)
 
 
 @dataclass(frozen=True)
@@ -107,15 +117,8 @@ class OpenAICompatibleMemoryLLM:
         if not self.add_enrichment:
             return {}
 
-        prompt = (
-            "你是记忆检索索引器。根据输入消息，为每条消息生成简洁的检索增强文本。"
-            "只能改写输入中明确出现的事实，不得推断、补全、回答未来问题或写入评测答案。"
-            "保留人名、地名、时间、数字、偏好、否定和变更关系。"
-            "必须输出 JSON 对象，格式为 "
-            '{"items":[{"source_index":0,"search_text":"..."}]}。'
-        )
         parsed = self._json_completion(
-            prompt,
+            ADD_ENRICHMENT_PROMPT_V2,
             {"messages": messages},
             max_tokens=min(4096, max(512, len(messages) * 160)),
         )
@@ -138,24 +141,21 @@ class OpenAICompatibleMemoryLLM:
                 output[index] = text.strip()[:4000]
         return output
 
-    def expand_query(self, query: str, options: list[str] | None) -> str:
+    def expand_query(self, query: str, options: list[str] | None) -> QueryExpansion:
         if not self.search_expansion:
-            return ""
+            return QueryExpansion(text="", temporal=None)
 
-        prompt = (
-            "你是记忆检索查询改写器。把原始问题改写成适合召回记忆证据的关键词和同义表达。"
-            "不得回答问题，不得判断选项，不得生成输入中不存在的事实。"
-            "必须输出 JSON 对象，格式为 {\"expanded_query\":\"...\"}。"
-        )
         parsed = self._json_completion(
-            prompt,
+            QUERY_EXPANSION_PROMPT_V3,
             {"query": query, "options": options or []},
             max_tokens=512,
         )
         expanded = parsed.get("expanded_query")
         if not isinstance(expanded, str):
             raise LLMError("LLM 查询扩展结果缺少 expanded_query")
-        return expanded.strip()[:4000]
+        # temporal 字段不合法时按无时间约束处理，不视为失败。
+        temporal = parse_temporal(parsed.get("temporal"))
+        return QueryExpansion(text=expanded.strip()[:4000], temporal=temporal)
 
 
 def build_memory_llm(settings: Settings) -> MemoryLLM:
