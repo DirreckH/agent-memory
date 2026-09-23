@@ -1,311 +1,167 @@
-# Agent Memory API（FastAPI + DeepSeek + FastEmbed + SQLite）
+# Agent Memory API（FastAPI + LLM + FastEmbed + SQLite）
 
-这是一个可本地运行、可 Docker 部署的文本记忆服务。记忆内容持久化到 SQLite；
-本地 ONNX 向量模型完成语义召回；DeepSeek 可选地生成索引增强文本和查询扩展。
-服务返回的始终是记忆证据，不生成最终答案。
+本地可运行、可 Docker 部署的文本记忆服务：SQLite 持久化 + ONNX 语义召回 + 可选 LLM 索引增强与查询扩展，V3 起支持时间感知检索。服务只返回记忆证据，不生成最终答案。
 
-## 先说明：原始接口定义与官网现行协议不一致
+## 接口协议
 
-截至 2026-08-26，Agent Memory Leaderboard 官网要求参赛方提供同步 **Add / Search**：
+同一组路径同时支持本地简化协议与 Agent Memory Leaderboard 官网 Add/Search 协议（路径名可自定，请求/响应格式才是固定契约）：
 
-- Add 请求必须包含 `request_id`、`messages`、`user_id`、`session_id`，成功响应要原样回显三个 ID；
-- Search 请求必须包含 `query`、`user_id`、`top_k`，可选 `options`；响应必须是
-  `{"data": [...]}`，每项至少包含 `id` 和 `content`；
-- `user_id` 是唯一检索隔离边界，不得跨用户召回；正式评测 `top_k=100`；
-- Add 必须在持久化完成且可立即检索后才返回 HTTP 200；
-- 正式任务需要一个无鉴权的 GET Health 地址，缺省检查 Add 同源 `/health`；
-- Search 只能返回记忆证据，不能直接生成最终答案；评测数据应在任务完成后 30 天内删除。
-
-因此，仅实现最初给出的 `{"memory_text": ...}` 与 `{"query": ...}` 无法通过官网 smoke。
-本项目在同一组路径上同时支持两种协议：
-
-| 路径 | 本地简化请求 | 官网兼容请求 |
+| 路径 | 简化请求 | 官网兼容请求 |
 | --- | --- | --- |
-| `POST /set` | `{"memory_text":"..."}` | 官方 Add JSON |
-| `POST /get` | `{"query":"..."}` | 官方 Search JSON |
+| `POST /set` | `{"memory_text":"..."}` | 官方 Add JSON（`request_id`/`messages`/`user_id`/`session_id`，响应回显三个 ID） |
+| `POST /get` | `{"query":"..."}` | 官方 Search JSON（`query`/`user_id`/`top_k`[/`options`]，响应 `{"data":[...]}`） |
 | `GET /health` | 无鉴权健康检查 | 官网正式任务需要 |
 
-路径名称本身不必叫 `/add`、`/search`；官网允许分别配置 Add URL 和 Search URL，
-请求与响应格式才是固定契约。FastAPI 的 Swagger/OpenAPI 页面默认关闭，因此除了必要的健康检查，
-不额外暴露业务接口。
+关键契约：`user_id` 是唯一检索隔离边界；Add 在持久化完成且可检索后才返回 200；Search 只返回证据不回答问题；评测数据 30 天内删除（由数据保留策略自动清理）。Swagger/OpenAPI 页面默认关闭，不额外暴露业务接口。注意：官网 Full 清单当前要求 `gpt-4o-mini`，DeepSeek 仅用于本地实验与方法验证，不能把 DeepSeek 运行结果冒充为合规勾选。
 
-还有一个不能忽略的规则冲突：官网当前 Full 提交清单明确要求 Add/Search 使用
-`gpt-4o-mini`。因此，**DeepSeek 模式可以用于本地开发、方法实验或兼容性验证，但按当前规则不能
-如实勾选 Full 的模型合规项**。本项目同时保留 `LLM_PROVIDER=openai` 的切换能力；正式提交前必须
-再次阅读当期规则，不应把 DeepSeek 运行结果冒充为 `gpt-4o-mini` 结果。
-
-官方资料：
-
-- [Agent Memory Leaderboard 文档与 API Guide](https://agentmemories.ai/home)
-- [DeepSeek API 首次调用](https://api-docs.deepseek.com/)
-- [DeepSeek JSON Output](https://api-docs.deepseek.com/guides/json_mode/)
-- [FastEmbed 官方文档](https://qdrant.github.io/fastembed/)
+官方资料：[Agent Memory 文档](https://agentmemories.ai/home) · [DeepSeek API](https://api-docs.deepseek.com/) · [FastEmbed](https://qdrant.github.io/fastembed/)
 
 ## 项目结构
 
 ```text
-.
-├── app/
-│   ├── config.py       # 环境变量配置
-│   ├── embeddings.py   # FastEmbed/ONNX 向量模型
-│   ├── llm.py          # DeepSeek/OpenAI 兼容调用
-│   ├── main.py         # FastAPI 路由
-│   ├── schemas.py      # 两套接口契约
-│   ├── service.py      # 写入、混合检索、阈值过滤
-│   └── storage.py      # SQLite、幂等、user_id 隔离
-├── scripts/
-│   ├── generate_benchmark.py # 用 DeepSeek 生成严格校验的合成数据
-│   └── run_benchmark.py      # 只通过 /set、/get 执行批量评测
-├── tests/test_api.py
-├── tests/test_benchmark_tools.py
-├── .env.example
-├── Dockerfile
-├── pytest.ini
-└── requirements.txt
+app/
+├── config.py       # 环境变量配置
+├── embeddings.py   # FastEmbed/ONNX 向量模型
+├── llm.py          # DeepSeek/OpenAI 兼容调用与结构化查询扩展
+├── main.py         # FastAPI 路由
+├── prompts.py      # 写入增强 V2 与查询扩展 V3 提示词
+├── schemas.py      # 两套接口契约
+├── service.py      # 写入、混合检索、时间感知打分
+├── storage.py      # SQLite、幂等、user_id 隔离
+└── temporal.py     # 时间约束解析、窗口计算、衰减打分（纯函数）
+scripts/
+├── generate_benchmark.py   # 用 DeepSeek 生成严格校验的合成数据
+└── run_benchmark.py        # 只通过 /set、/get 执行批量评测
+tests/
+├── test_api.py
+├── test_benchmark_tools.py
+├── test_prompt_v2.py       # 提示词 V2/V3 数据流（模拟 SDK 响应）
+├── test_temporal.py        # 时间感知检索单元与服务级测试
+└── fixtures/
 ```
 
-## 1. 本地安装与启动
+## 1. 本地启动
 
-需要 Python 3.10+。以下命令适用于 Windows PowerShell：
+需要 Python 3.10+，命令适用于 Windows PowerShell：
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 Copy-Item .env.example .env
-```
-
-不填任何 LLM 密钥也能运行完整的本地向量写入与检索：
-
-```powershell
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-第一次真实调用 `/set` 时会下载
-`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` 的 ONNX 文件（约 220 MB）到
-`data/model_cache`；之后复用本地缓存。SQLite 文件位于 `data/agent_memory.db`。
+不填任何 LLM 密钥即可运行完整的向量写入与检索。首次 `/set` 会下载约 220 MB 的 ONNX 模型（`paraphrase-multilingual-MiniLM-L12-v2`）到 `data/model_cache`，之后复用缓存；SQLite 位于 `data/agent_memory.db`。
 
-健康检查：
+## 2. LLM 配置（可选）
 
-```powershell
-curl.exe http://127.0.0.1:8000/health
-```
+LLM 负责三件事：Add 时生成事实保真的索引增强文本；Search 时扩展同义表达；从查询中抽取结构化时间约束（V3）。提示词明确禁止回答问题或判断选项，返回的 `content` 始终是原始消息。
 
-## 2. 填入 DeepSeek API Key
-
-编辑 `.env`，只改本地文件，不要把它提交到 Git：
+DeepSeek（本地实验，默认 `deepseek-v4-flash`）：
 
 ```dotenv
 LLM_PROVIDER=deepseek
-DEEPSEEK_API_KEY=在这里填入你的真实密钥
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_API_KEY=你的密钥
 ```
 
-然后重启 Uvicorn。当前 DeepSeek 官方文档列出的通用模型是
-`deepseek-v4-flash` / `deepseek-v4-pro`；旧的 `deepseek-chat` 已进入弃用流程，因此没有把旧名称写死。
-
-DeepSeek 在本项目中执行两件事：
-
-1. Add 时给每条原始消息生成“仅用于检索”的事实保真索引文本；
-2. Search 时扩展同义表达，但提示词明确禁止回答问题或判断选项。
-
-最终返回的 `content` 仍是原始消息证据。`LLM_FAILURE_MODE=fallback` 时，上游异常会自动退回纯向量检索；
-若要求每次调用严格使用同一模型，可改为 `strict`，此时 LLM 异常返回可重试的 HTTP 503。
-
-正式 Full 若仍执行官网当前的 `gpt-4o-mini` 规则，应使用：
+官网 Full 合规模式：
 
 ```dotenv
 LLM_PROVIDER=openai
-OPENAI_API_KEY=在这里填入对应密钥
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_API_KEY=你的密钥
 LLM_FAILURE_MODE=strict
 ```
 
-## 3. 可直接复制的 curl 验证
+`LLM_FAILURE_MODE=fallback` 时上游异常自动退回纯向量检索；`strict` 时返回可重试的 HTTP 503，便于压测时暴露上游问题。
 
-### 简化接口：写入
+## 3. 时间感知检索（V3）
+
+针对长期多轮对话中的时间序列推理，V3 把时间处理拆成“LLM 抽取 + 确定性解析”两层：
+
+- 查询扩展提示词 V3 输出结构化时间约束：滚动窗口（“最近三个月”）、日历窗口（“上个月”）、事件锚点（“搬家之前”）、首末次排序（“第一次/最后一次”）。模型不知道也不计算当前时间，不做任何日期换算；
+- 绝对窗口由 `app/temporal.py` 纯函数计算。锚点优先取该 user 的对话前沿（记忆中最大事件时间），全库无时间信息才回退服务器时钟；
+- 软模式（默认）：`分数 = w_sem·语义 + w_lex·词法 + w_time·time_match`。窗口内得 1.0，窗口外按半衰期衰减，**无时间戳记录取中性值 0.5，永不惩罚**；
+- 严格模式：窗口内候选足够时截掉窗口外记录；时间未知的记录始终保留；
+- 事件锚定采用两阶段检索：先用事件短语定位最佳命中记录，以其事件时间为窗口边界，置信度低于阈值则放弃约束、退回常规检索；
+- 程序化守卫：LLM 声称的时间约束必须能在查询原文中回查到时间信号，否则视为幻觉丢弃；
+- `TEMPORAL_MODE=off` 时打分路径与旧版逐位一致，可安全回归。
+
+```dotenv
+TEMPORAL_MODE=soft                  # off / soft / strict
+TEMPORAL_WEIGHT=0.20                # 时间项权重（与 0.8/0.2 三路归一化）
+TEMPORAL_DECAY_HALF_LIFE_DAYS=30    # 窗口外距离衰减的半衰期
+TEMPORAL_EVENT_ANCHOR_MIN_SCORE=0.30 # 事件锚点定位的最低置信分
+```
+
+## 4. curl 验证
+
+简化写入与查询：
 
 ```powershell
 curl.exe -X POST "http://127.0.0.1:8000/set" -H "Content-Type: application/json" -d '{"memory_text":"用户最喜欢的饮料是无糖拿铁。"}'
-```
-
-预期返回：
-
-```json
-{"success":true,"message":"记忆写入成功，现已可检索","memory_count":1}
-```
-
-### 简化接口：相关查询
-
-```powershell
 curl.exe -X POST "http://127.0.0.1:8000/get" -H "Content-Type: application/json" -d '{"query":"用户喜欢喝什么饮料？"}'
 ```
 
-`memory_text` 应包含“无糖拿铁”，`results` 给出排序、分数和稳定记忆 ID。
+无关查询低于 `MIN_RELEVANCE_SCORE` 时返回 `{"memory_text":"","results":[]}`。
 
-### 简化接口：无关查询
-
-```powershell
-curl.exe -X POST "http://127.0.0.1:8000/get" -H "Content-Type: application/json" -d '{"query":"鲸鱼如何在水下交流？"}'
-```
-
-结果低于 `MIN_RELEVANCE_SCORE` 时返回：
-
-```json
-{"memory_text":"","results":[]}
-```
-
-### 官网兼容 Add
+官网兼容格式：
 
 ```powershell
 curl.exe -X POST "http://127.0.0.1:8000/set" -H "Content-Type: application/json" -d '{"request_id":"eval:demo:chunk-0","messages":[{"role":"user","timestamp":1704067200000,"content":"Alice prefers Ethiopian coffee."}],"user_id":"eval:demo:user-1","session_id":"eval:demo:session-1"}'
-```
-
-### 官网兼容 Search
-
-```powershell
 curl.exe -X POST "http://127.0.0.1:8000/get" -H "Content-Type: application/json" -d '{"query":"What coffee does Alice prefer?","user_id":"eval:demo:user-1","top_k":100}'
 ```
 
-响应是官网规定的对象：
+## 5. API 鉴权
 
-```json
-{"data":[{"id":"mem_...","content":"[user | 2024-01-01T00:00:00.000Z]\nAlice prefers Ethiopian coffee.","score":0.8,"created_at":"2024-01-01T00:00:00.000Z"}]}
-```
+公网部署必须设置 `MEMORY_API_KEY`（`python -c "import secrets; print(secrets.token_urlsafe(32))"` 生成），支持 `Authorization: Bearer`、`Authorization: Token` 与 `X-Api-Key` 三种传法；`/health` 按契约始终免鉴权。不要把密钥放在 URL、代码或公开仓库中。
 
-实际分数由本地模型计算，不保证与示例数字完全相同。
-
-## 4. API 鉴权
-
-公网服务不要保持匿名。先生成强随机密钥并写入 `.env` 的 `MEMORY_API_KEY`：
-
-```powershell
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
-服务兼容官网支持的三种传法：
-
-```powershell
-curl.exe -X POST "http://127.0.0.1:8000/get" -H "Content-Type: application/json" -H "Authorization: Bearer 你的MEMORY_API_KEY" -d '{"query":"test"}'
-curl.exe -X POST "http://127.0.0.1:8000/get" -H "Content-Type: application/json" -H "Authorization: Token 你的MEMORY_API_KEY" -d '{"query":"test"}'
-curl.exe -X POST "http://127.0.0.1:8000/get" -H "Content-Type: application/json" -H "X-Api-Key: 你的MEMORY_API_KEY" -d '{"query":"test"}'
-```
-
-`/health` 按官网契约始终无需鉴权。不要把密钥放在 URL、代码、截图或公开仓库中。
-
-## 5. 运行 pytest
+## 6. 运行 pytest
 
 ```powershell
 python -m pytest
 ```
 
-测试使用确定性的离线假向量器，不下载模型、不调用 DeepSeek/OpenAI。覆盖：
+全部测试使用确定性的离线假向量器与桩 LLM，不下载模型、不调用外部 API。71 个用例覆盖：简化/官网双协议契约、`user_id` 严格隔离、Add 幂等与冲突检测、可选鉴权、提示词 V2/V3 数据流、时间窗口数学（日历/滚动/月末收敛）、软打分与严格模式、事件锚定、幻觉守卫，以及 `TEMPORAL_MODE=off` 与旧版分数逐位一致的回归断言。
 
-- 简化 `/set` 写入与 `/get` 正向召回；
-- 无关 query 返回空结果；
-- 官网 Add/Search 请求与响应格式；
-- `user_id` 严格隔离；
-- Add 重试幂等与冲突检测；
-- 可选 Bearer API Key 和无鉴权 Health。
+## 7. 合成数据批量测试
 
-## 6. 使用 DeepSeek 生成 200 条合成数据并批量测试
-
-生成器始终读取 `.env` 中的 `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL` 和
-`DEEPSEEK_MODEL`，与服务当前的 `LLM_PROVIDER` 无关。因此服务可以继续使用 RightCode，
-同时单独使用 DeepSeek 生成测试数据。默认生成 180 条正例和 20 条负例：
+生成器始终读取 `.env` 的 DeepSeek 配置，与服务当前的 `LLM_PROVIDER` 无关。正例答案必须逐字存在于记忆且不泄漏在 query 中，负例必须无答案，重复项自动丢弃补齐：
 
 ```powershell
-python -m scripts.generate_benchmark `
-  --count 200 `
-  --negative-count 20 `
-  --batch-size 20 `
-  --output data/benchmark_200.jsonl
+python -m scripts.generate_benchmark --count 200 --negative-count 20 --output data/benchmark_200.jsonl
 ```
 
-生成器会严格检查：正例答案必须逐字存在于记忆中、不得直接泄漏在 query 中；负例必须没有答案；
-重复的记忆、query 和答案会被丢弃并自动补齐。所有内容都要求是虚构合成数据。默认约需 10 个
-DeepSeek 批次请求，实际请求数取决于模型输出通过校验的比例。
-
-建议为批量测试使用独立数据库。在启动服务的 PowerShell 窗口中执行：
+建议为批量测试使用独立数据库，并保持 `LLM_FAILURE_MODE=strict`，避免本地回退掩盖上游失败：
 
 ```powershell
 $env:DATABASE_PATH="data/benchmark_run.db"
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+# 另一窗口：
+python -m scripts.run_benchmark --dataset data/benchmark_200.jsonl --base-url http://127.0.0.1:8000 --top-k 5 --min-recall 0.90 --report data/benchmark_report.json
 ```
 
-然后在另一个 PowerShell 窗口执行：
+运行器只走 HTTP，输出 Set/Search 成功率、Recall@1/@k、MRR、负例误召回率与延迟 p50/p95/max；每次运行使用独立 `run_id` 隔离，不会检索到历史数据。不要用真实个人信息、隐藏样本或已知金标生成测试数据，合成结果也不能替代官方评测。
 
-```powershell
-python -m scripts.run_benchmark `
-  --dataset data/benchmark_200.jsonl `
-  --base-url http://127.0.0.1:8000 `
-  --top-k 5 `
-  --concurrency 4 `
-  --min-recall 0.90 `
-  --max-negative-fpr 0.20 `
-  --report data/benchmark_report.json
-```
-
-运行器只使用官网格式的 `/set`、`/get` HTTP 请求，不读取 SQLite。它会先完成全部写入，再完成全部
-查询，并输出：
-
-- Set/Search 成功率和失败样例 ID；
-- Recall@1、Recall@5、MRR@5；
-- 负例误召回率；
-- Set/Get 延迟的 p50、p95 和最大值。
-
-每次运行自动生成新的 `run_id` 和用户隔离空间，不会检索到之前运行的数据。当前配置同时开启
-`LLM_ADD_ENRICHMENT` 与 `LLM_SEARCH_EXPANSION` 时，200 条测试会产生约 200 次写入 LLM 调用和
-200 次查询 LLM 调用。若网关限流，可把 `--concurrency` 降为 1 或 2。保持
-`LLM_FAILURE_MODE=strict`，否则上游失败可能被本地回退掩盖，导致测试结论失真。
-
-数据集、独立数据库和报告都位于已被 Git 忽略的 `data/` 目录。不要使用真实个人信息、比赛隐藏样本
-或已知金标生成测试数据；合成测试结果也不能替代 AgentMemory 官方评测。
-
-## 7. Docker
+## 8. Docker 与公网调试
 
 ```powershell
 docker build -t agent-memory-api .
 docker run --rm -p 8000:8000 --env-file .env -v "${PWD}/data:/app/data" agent-memory-api
 ```
 
-必须挂载 `/app/data`，否则容器删除后 SQLite 记忆和模型缓存都会丢失。
-
-## 8. ngrok 公网调试
-
-服务启动后另开终端：
-
-```powershell
-ngrok http 8000
-```
-
-把 ngrok 给出的 HTTPS 地址配置为：
-
-- Add URL：`https://你的域名/set`
-- Search URL：`https://你的域名/get`
-- Health URL：`https://你的域名/health`
-
-ngrok 临时隧道适合本地联调和 smoke，不满足官网“托管接口至少 30 天稳定公网可达”的正式提交要求。
-正式评测应使用带 HTTPS、持久卷、进程守护和监控的 VPS/云容器，并按实际压测结果申报并发、超时和限流能力。
+必须挂载 `/app/data`，否则容器删除后 SQLite 记忆和模型缓存都会丢失。`ngrok http 8000` 可用于临时联调（Add/Search/Health 分别指向 `/set`、`/get`、`/health`），但不满足“至少 30 天稳定公网可达”的正式要求，正式提交应使用带 HTTPS、持久卷、进程守护的云部署。
 
 ## 实现边界与调参
 
-- SQLite 使用 WAL、同步事务和 `request_id` 幂等表；Add 在向量写入提交后才返回 200。
-- 每条消息单独存储，适合官网每次最多约 20 条消息/2000 词的分块方式。
-- 检索只加载当前 `user_id`，语义余弦分数与 Unicode 关键词重合度混合排序。
-- `MIN_RELEVANCE_SCORE` 越高，误召回更少但漏召回更多；正式打榜前应只用公开训练/验证材料调参，不能接触或硬编码评测金标。
-- 自动清理按写入时间执行，是对“30 天内删除评测数据”的保守实现；如需精确按 Job 完成时间清理，应在获得平台回调/任务元数据后扩展内部管理流程，不能靠公开 Search 接口完成。
-- 更换 `EMBEDDING_MODEL` 后，旧 SQLite 向量可能维度不一致。应使用新数据库文件或离线重建索引，不能混用分数。
+- SQLite 使用 WAL、同步事务与 `request_id` 幂等表；Add 在向量写入提交后才返回 200；每条消息独立存储。
+- 检索只加载当前 `user_id`；无时间约束时为语义余弦 + Unicode 关键词重合度的二元混合（默认 0.8/0.2），有时间窗口时三路归一化。
+- `MIN_RELEVANCE_SCORE` 越高误召回越少但漏召回越多；只能用公开材料调参，禁止接触或硬编码评测金标。
+- 更换 `EMBEDDING_MODEL` 后旧向量维度可能不一致，应换新数据库或离线重建索引，不能混用分数。
+- 数据按写入时间自动清理，是“评测数据 30 天内删除”的保守实现。
 
-## 原创性、依赖与数据出境披露
+## 依赖与数据披露
 
-- 本仓库中的 API 封装、SQLite 幂等/隔离逻辑和混合检索逻辑是为本实现新编写的，未复制某个记忆论文或现成记忆仓库；
-- 向量运行时使用 Qdrant 维护的 FastEmbed，默认模型为 Apache-2.0 许可的
-  `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`；其余 Python 依赖及版本范围见
-  `requirements.txt`，正式投稿时应按主办方表单要求列出对应作者和许可证；
-- 开启 DeepSeek/OpenAI 后，原始消息和查询会被发送给所选第三方 API。部署方必须自行确认比赛数据规则、
-  第三方数据保留政策、所在地区合规要求和主办方是否允许该处理方式；若不能发送评测数据，应保持
-  `LLM_PROVIDER=none`，只运行本地向量检索；
-- 禁止用 benchmark 金标、泄漏样本、人工实时答题或提示注入调整本系统。本实现不包含任何数据集硬编码。
+- API 封装、SQLite 幂等/隔离、混合检索与时间感知逻辑均为本实现原创，未复制现成记忆论文或仓库；向量运行时为 Qdrant 维护的 FastEmbed（默认模型 Apache-2.0），其余依赖见 `requirements.txt`。
+- 开启 DeepSeek/OpenAI 后，原始消息和查询会发送给所选第三方 API；部署方需自行确认比赛数据规则与所在地区合规要求。不能发送评测数据时保持 `LLM_PROVIDER=none`，只运行本地向量检索。
+- 本实现不含任何数据集硬编码；禁止用 benchmark 金标、泄漏样本、人工实时答题或提示注入调整本系统。
