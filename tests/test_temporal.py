@@ -184,6 +184,16 @@ def test_time_match_unbounded_windows() -> None:
     assert time_match(1000, after, half_life_days=30.0) < 1.0
 
 
+def test_time_match_hard_boundary_gives_zero_outside() -> None:
+    before = TemporalWindow(start_ms=None, end_ms=5000, hard_boundary=True)
+    assert time_match(1000, before, half_life_days=30.0) == 1.0
+    assert time_match(5000, before, half_life_days=30.0) == 0.0
+    assert time_match(5001, before, half_life_days=30.0) == 0.0
+    after = TemporalWindow(start_ms=5000, end_ms=None, hard_boundary=True)
+    assert time_match(6000, after, half_life_days=30.0) == 1.0
+    assert time_match(4999, after, half_life_days=30.0) == 0.0
+
+
 def test_effective_time_prefers_source_timestamp() -> None:
     assert effective_time_ms(1234, "2026-01-01T00:00:00.000Z") == 1234
 
@@ -405,6 +415,17 @@ def test_event_anchor_window_boosts_pre_event_records(tmp_path: Path) -> None:
     after_hit = by_time["2026-08-01T00:00:00.000Z"]
     assert before_hit.score > after_hit.score
     assert hits.index(before_hit) < hits.index(after_hit)
+
+    # 白盒验证：事件锚定窗口是硬边界，事件记录本身与事件之后的记录
+    # 不再因距离小而获得时间加权。
+    records = service.store.fetch_by_user("user-1")
+    window = service._resolve_event_anchor_window(
+        EventAnchorSpec(event="moved to Shanghai", direction="before"), records
+    )
+    assert window is not None
+    assert window.hard_boundary is True
+    assert time_match(EVENT_TIME, window, half_life_days=30.0) == 0.0
+    assert time_match(OLD, window, half_life_days=30.0) == 1.0
 
 
 def test_unresolvable_event_anchor_falls_back_to_plain_search(tmp_path: Path) -> None:

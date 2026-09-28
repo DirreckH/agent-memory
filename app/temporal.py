@@ -29,7 +29,7 @@ _TEMPORAL_SIGNAL_RE = re.compile(
     r"(?:ago|later|within)\b|"
     r"\b(?:yesterday|tomorrow|today|first|last|latest|earliest|recently|recent|"
     r"since|until|before|after|ago|last\s+\w+|next\s+\w+|"
-    r"this\s+(?:week|month|year))\b",
+    r"this\s+(?:past\s+)?(?:week|month|year))\b",
     re.IGNORECASE,
 )
 
@@ -68,10 +68,15 @@ class TemporalConstraints:
 
 @dataclass(frozen=True)
 class TemporalWindow:
-    """半开时间区间 [start_ms, end_ms)；None 表示该侧无界。"""
+    """半开时间区间 [start_ms, end_ms)；None 表示该侧无界。
+
+    hard_boundary=True 用于事件锚定窗口：边界语义是硬的（“搬家之前”
+    明确不含搬家事件本身），窗外记录不因距离小而获得软衰减分。
+    """
 
     start_ms: int | None
     end_ms: int | None
+    hard_boundary: bool = False
 
     def contains(self, time_ms: int) -> bool:
         if self.start_ms is not None and time_ms < self.start_ms:
@@ -257,11 +262,14 @@ def time_match(
     """时间匹配分：窗口内 1.0；窗口外按距离半衰衰减；时间未知取中性值 0.5。
 
     未知时间取 0.5 而不是惩罚值，避免无时间戳记忆在时间查询中被错杀。
+    硬边界窗口（事件锚定）窗外一律 0 分，不享受近距离软衰减。
     """
     if time_ms is None:
         return 0.5
     if window.contains(time_ms):
         return 1.0
+    if window.hard_boundary:
+        return 0.0
     distance_ms = window.distance_ms(time_ms)
     if distance_ms <= 0:
         return 1.0

@@ -329,8 +329,12 @@ class MemoryService:
             # 找不到高置信事件记录时放弃约束，退回常规检索而不是猜测边界。
             return None
         if anchor.direction == "before":
-            return TemporalWindow(start_ms=None, end_ms=best_time)
-        return TemporalWindow(start_ms=best_time, end_ms=None)
+            return TemporalWindow(
+                start_ms=None, end_ms=best_time, hard_boundary=True
+            )
+        return TemporalWindow(
+            start_ms=best_time, end_ms=None, hard_boundary=True
+        )
 
     def _score_record(
         self,
