@@ -16,7 +16,6 @@ from __future__ import annotations
 import argparse
 import json
 import tempfile
-import time
 from pathlib import Path
 
 from app.config import Settings
@@ -34,6 +33,9 @@ from scripts.benchmark_common import (
 
 MODES = ("off", "soft")
 DAY_MS = 86_400_000
+# 固定测量基准时间：记录内容渲染包含时间戳（[user | 时间]）且会参与向量化，
+# 用墙钟会让每次运行的嵌入漂移、近平局用例随机翻转。钉死常量保证可复现。
+MEASUREMENT_NOW_MS = 1_800_000_000_000
 
 # query_type 到期望时间约束签名的映射，用于抽取层一致率诊断。
 _EXPECTED_SIGNATURE = {
@@ -300,7 +302,7 @@ def main() -> int:
         )
         services[mode].initialize()
 
-    now_ms = int(time.time() * 1000)
+    now_ms = MEASUREMENT_NOW_MS
     report = run_ab(services, cases, now_ms=now_ms, top_k=args.top_k)
     if isinstance(llm, RecordingMemoryLLM):
         report["extraction"] = extraction_report(cases, llm.expansions)

@@ -55,6 +55,11 @@ class Settings(BaseSettings):
         default=0.30, ge=0.0, le=1.0
     )
 
+    # 双通道查询：扩展文本存在时，裸查询与扩展查询各自嵌入打分并取较大值，
+    # 防止扩展文本把弱相关证据（多跳链中的桥接/答案跳）挤到相关性地板之下。
+    # false 时回退为 V3 的单通道混合查询（扩展文本并入主查询文本）。
+    query_dual_channel: bool = True
+
     # 简化 /set、/get 接口没有 user_id，统一放入此本地隔离空间。
     local_user_id: str = Field(default="local-default", min_length=1, max_length=256)
     max_memory_chars: int = Field(default=200_000, ge=1, le=2_000_000)

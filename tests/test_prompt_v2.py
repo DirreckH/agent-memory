@@ -115,12 +115,18 @@ def test_v2_add_search_data_flow(case: dict, tmp_path: Path) -> None:
         assert found.status_code == 200
         assert {hit["content"] for hit in found.json()["data"]} == set(originals)
 
-    query_parts = [case["query"]]
+    base_parts = [case["query"]]
     if case.get("options"):
-        query_parts.append("候选项：\n" + "\n".join(case["options"]))
-    if case["query_output"]["expanded_query"]:
-        query_parts.append("查询扩展：" + case["query_output"]["expanded_query"])
-    assert embedder.inputs[1] == ["\n".join(query_parts)]
+        base_parts.append("候选项：\n" + "\n".join(case["options"]))
+    # 双通道：裸查询与扩展文本在同一次 embed 调用中作为两个通道；
+    # 无扩展文本时只有裸查询一个通道。
+    expected_query_texts = ["\n".join(base_parts)]
+    expanded_query = case["query_output"]["expanded_query"]
+    if expanded_query:
+        expected_query_texts.append(
+            "\n".join(base_parts) + "\n查询扩展：" + expanded_query
+        )
+    assert embedder.inputs[1] == expected_query_texts
 
     add_call, search_call = [call.kwargs for call in completion.call_args_list]
     assert add_call["messages"][0] == {"role": "system", "content": ADD_ENRICHMENT_PROMPT_V2}

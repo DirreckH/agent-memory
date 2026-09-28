@@ -4,10 +4,10 @@
 因此本实验的核心指标是“全链召回率”（top-k 中同时包含每一跳证据的
 比例），而非答案正确率。
 
-两种查询条件对比（共享同一记忆库，只差查询表达层）：
-- pure：裸查询（无扩展），即当前系统的检索下界；
-- oracle_expansion：附上仅由查询可推导的理想扩展文本，预演
-  “查询表达层做到完美”能带来的增益，为 Tier 1/2 决策提供依据。
+三种查询条件对比（共享同一记忆库，只差查询表达层与通道开关）：
+- pure：裸查询（无扩展），即检索下界；
+- expansion_single：扩展文本并入主查询单通道嵌入（V3 行为）；
+- expansion_dual：裸查询与扩展查询双通道取较大分（双通道改造）。
 
 干扰记忆（fillers）由模板库按 case 种子确定性生成，模拟真实规模的
 历史（默认每 user 180 条），使 top-100 的选择具有排序压力。
@@ -24,7 +24,6 @@ import argparse
 import json
 import random
 import tempfile
-import time
 from pathlib import Path
 
 from app.config import Settings
@@ -43,6 +42,9 @@ from scripts.benchmark_common import (
 DAY_MS = 86_400_000
 ADD_BATCH = 100
 THRESHOLDS = (10, 20, 100)
+# 固定测量基准时间：记录内容渲染包含时间戳（[user | 时间]）且会参与向量化，
+# 用墙钟会让每次运行的嵌入漂移、近平局用例随机翻转。钉死常量保证可复现。
+MEASUREMENT_NOW_MS = 1_800_000_000_000
 
 # ---------------------------- 干扰记忆模板库（与任何用例的跳关键词无交集）
 
@@ -359,16 +361,22 @@ def main() -> int:
 
     expansions = {case.query: case.oracle_expansion for case in cases}
     services: dict[str, MemoryService] = {}
-    for mode, llm in (
-        ("pure", NoOpMemoryLLM()),
-        ("oracle_expansion", OracleExpansionLLM(expansions)),
+    # expansion_dual 与 expansion_single 使用同一份扩展文本，唯一差异是
+    # QUERY_DUAL_CHANNEL 开关——直接给出双通道改造的前后对照。
+    for mode, llm, dual in (
+        ("pure", NoOpMemoryLLM(), True),
+        ("expansion_dual", OracleExpansionLLM(expansions), True),
+        ("expansion_single", OracleExpansionLLM(expansions), False),
     ):
         services[mode] = MemoryService(
-            Settings(database_path=database_path), store, embedder, llm
+            Settings(database_path=database_path, query_dual_channel=dual),
+            store,
+            embedder,
+            llm,
         )
     services["pure"].initialize()
 
-    now_ms = int(time.time() * 1000)
+    now_ms = MEASUREMENT_NOW_MS
     report = run_multihop(
         services, cases, now_ms=now_ms, top_k=args.top_k
     )

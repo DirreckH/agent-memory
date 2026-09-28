@@ -404,13 +404,21 @@ class MemoryService:
 
         try:
             expansion = self._llm_query_expansion(query, options)
-            parts = [query]
+            base_parts = [query]
             if options:
-                parts.append("候选项：\n" + "\n".join(options))
+                base_parts.append("候选项：\n" + "\n".join(options))
+            base_text = "\n".join(base_parts)
+            # 双通道：裸查询与扩展查询分别嵌入、每条记录取较大分，扩展只能
+            # 提升分数、不能把弱相关证据挤下相关性地板。无扩展文本或关闭
+            # 双通道时保持单通道，打分路径与 V3 逐位一致。
+            query_texts = [base_text]
             if expansion.text:
-                parts.append("查询扩展：" + expansion.text)
-            query_text = "\n".join(parts)
-            query_vector = self.embedder.embed([query_text])[0]
+                expanded_text = base_text + "\n查询扩展：" + expansion.text
+                if self.settings.query_dual_channel:
+                    query_texts.append(expanded_text)
+                else:
+                    query_texts = [expanded_text]
+            query_vectors = self.embedder.embed(query_texts)
         except (LLMError, EmbeddingError) as exc:
             raise MemoryServiceUnavailable(str(exc)) from exc
 
@@ -436,11 +444,19 @@ class MemoryService:
                 if window is not None
                 else None
             )
-            score = self._score_record(
-                query_text, query_vector, record, weights=weights, time_match=bonus
-            )
-            if score is not None and score >= self.settings.min_relevance_score:
-                scored.append((score, record, record_time))
+            best: float | None = None
+            for index, text in enumerate(query_texts):
+                score = self._score_record(
+                    text,
+                    query_vectors[index],
+                    record,
+                    weights=weights,
+                    time_match=bonus,
+                )
+                if score is not None and (best is None or score > best):
+                    best = score
+            if best is not None and best >= self.settings.min_relevance_score:
+                scored.append((best, record, record_time))
 
         limit = min(top_k, self.settings.max_top_k, self.settings.candidate_pool_size)
         if self.settings.temporal_mode == "strict":
