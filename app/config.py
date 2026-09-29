@@ -29,13 +29,27 @@ class Settings(BaseSettings):
     data_retention_days: int = Field(default=30, ge=1, le=3650)
     ingestion_stale_seconds: int = Field(default=300, ge=30, le=86400)
 
-    # FastEmbed 使用 ONNX Runtime，不依赖 PyTorch/GPU。
+    # 向量提供方：fastembed=本地 ONNX（离线）；dashscope=阿里百炼 API。
+    # 学术榜（开源方法榜）当前要求统一使用 text-embedding-v4（DashScope）：
+    # 提交学术榜时设置 EMBEDDING_PROVIDER=dashscope、EMBEDDING_MODEL=text-embedding-v4。
+    # 注意：更换向量模型后维度不一致，必须使用全新数据库，不能混用分数。
+    embedding_provider: Literal["fastembed", "dashscope"] = "fastembed"
+    # fastembed 模式下是 ONNX 模型名；dashscope 模式下是百炼 API 模型名。
     embedding_model: str = (
         "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     )
     embedding_cache_dir: Path = Path("data/model_cache")
     embedding_threads: int = Field(default=2, ge=1, le=64)
     warmup_embedding_on_startup: bool = False
+
+    # DashScope 向量：OpenAI 兼容端点。text-embedding-v4 单次请求最多 10 条
+    # 文本（由 DashScopeEmbedder 内部分批）、默认 1024 维（可选 64-2048）。
+    dashscope_api_key: SecretStr | None = None
+    dashscope_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    dashscope_timeout_seconds: float = Field(default=30.0, ge=1.0, le=300.0)
+    dashscope_max_retries: int = Field(default=2, ge=0, le=5)
+    # 可选输出维度：None 走服务端默认（text-embedding-v4 为 1024）。
+    embedding_dimensions: int | None = Field(default=None, ge=64, le=2048)
 
     # 混合检索：语义相似度 + 轻量关键词重合度。
     semantic_weight: float = Field(default=0.80, ge=0.0, le=1.0)
@@ -59,6 +73,13 @@ class Settings(BaseSettings):
     # 防止扩展文本把弱相关证据（多跳链中的桥接/答案跳）挤到相关性地板之下。
     # false 时回退为 V3 的单通道混合查询（扩展文本并入主查询文本）。
     query_dual_channel: bool = True
+
+    # 接口输入日志：把进入 /set、/get 的请求正文写入 JSONL，用于联调与事后复盘。
+    # 日志是评测数据在主库之外的第二份副本：文件按天轮转，保留份数对齐
+    # DATA_RETENTION_DAYS，到期自动删除。只记录请求体，永不记录请求头。
+    input_log_enabled: bool = True
+    input_log_path: Path = Path("data/logs/input.jsonl")
+    input_log_max_chars: int = Field(default=20_000, ge=100, le=2_000_000)
 
     # 简化 /set、/get 接口没有 user_id，统一放入此本地隔离空间。
     local_user_id: str = Field(default="local-default", min_length=1, max_length=256)

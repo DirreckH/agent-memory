@@ -70,8 +70,21 @@ DEEPSEEK_API_KEY=你的密钥
 ```dotenv
 LLM_PROVIDER=openai
 OPENAI_API_KEY=你的密钥
+OPENAI_BASE_URL=https://api.chatanywhere.tech/v1
 LLM_FAILURE_MODE=strict
 ```
+
+国内服务器无法直连官方端点时，用 ChatAnywhere 中转调用 `gpt-4o-mini`（`api.chatanywhere.tech`，走 OpenAI 官方转发；免费线限 200 次/天/IP，正式评测需付费 key）。配置无需改代码——[llm.py](app/llm.py) 的 OpenAI 兼容客户端直接读取 `OPENAI_BASE_URL`。
+
+学术榜（开源方法榜）向量配置——官网要求统一使用 `text-embedding-v4`（阿里百炼 DashScope，Qwen3-Embedding 系列）：
+
+```dotenv
+EMBEDDING_PROVIDER=dashscope
+EMBEDDING_MODEL=text-embedding-v4
+DASHSCOPE_API_KEY=你的百炼密钥
+```
+
+切换后向量维度从本地 MiniLM 的 384 变为 1024（默认，可选 64-2048），**必须使用全新数据库，不能混用分数**。`text-embedding-v4` 单次请求最多 10 条文本，由服务内部自动分批；兼容端点复用 OpenAI SDK，无需新增依赖。
 
 `LLM_FAILURE_MODE=fallback` 时上游异常自动退回纯向量检索；`strict` 时返回可重试的 HTTP 503，便于压测时暴露上游问题。
 
@@ -155,6 +168,7 @@ docker run --rm -p 8000:8000 --env-file .env -v "${PWD}/data:/app/data" agent-me
 ## 实现边界与调参
 
 - SQLite 使用 WAL、同步事务与 `request_id` 幂等表；Add 在向量写入提交后才返回 200；每条消息独立存储。
+- 接口输入日志默认开启：`/set`、`/get` 的请求正文写入 `INPUT_LOG_PATH`（JSONL，按天轮转）。它是评测数据的第二份副本，保留份数对齐 `DATA_RETENTION_DAYS`；只记请求体，永不记请求头。
 - 检索只加载当前 `user_id`；无时间约束时为语义余弦 + Unicode 关键词重合度的二元混合（默认 0.8/0.2），有时间窗口时三路归一化。
 - `MIN_RELEVANCE_SCORE` 越高误召回越少但漏召回越多；只能用公开材料调参，禁止接触或硬编码评测金标。
 - 更换 `EMBEDDING_MODEL` 后旧向量维度可能不一致，应换新数据库或离线重建索引，不能混用分数。

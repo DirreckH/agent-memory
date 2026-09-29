@@ -7,7 +7,8 @@ from typing import Union
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 
 from app.config import Settings
-from app.embeddings import Embedder, FastEmbedder
+from app.embeddings import Embedder, build_embedder
+from app.input_log import InputLogMiddleware, build_input_logger
 from app.llm import MemoryLLM, build_memory_llm
 from app.schemas import (
     CompetitionAddRequest,
@@ -51,11 +52,9 @@ def create_app(
     store = SQLiteMemoryStore(
         settings.database_path, stale_seconds=settings.ingestion_stale_seconds
     )
-    embedder = embedder or FastEmbedder(
-        model_name=settings.embedding_model,
-        cache_dir=settings.embedding_cache_dir,
-        threads=settings.embedding_threads,
-    )
+    # 向量提供方由 EMBEDDING_PROVIDER 决定：fastembed=本地 ONNX；
+    # dashscope=百炼 text-embedding-v4（学术榜要求）。
+    embedder = embedder or build_embedder(settings)
     llm = llm or build_memory_llm(settings)
     service = MemoryService(settings, store, embedder, llm)
 
@@ -76,6 +75,15 @@ def create_app(
     )
     app.state.settings = settings
     app.state.memory_service = service
+
+    # 输入日志：评测数据在主库之外的第二份副本，轮转保留期与
+    # DATA_RETENTION_DAYS 对齐；只记请求体，永不记请求头。
+    if settings.input_log_enabled:
+        app.add_middleware(
+            InputLogMiddleware,
+            logger=build_input_logger(settings),
+            max_chars=settings.input_log_max_chars,
+        )
 
     def require_api_key(
         authorization: str | None = Header(default=None),
