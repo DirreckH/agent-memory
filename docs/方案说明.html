@@ -1,0 +1,1193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Memory API · 时间感知检索方案说明（V3.1 双通道）</title>
+<style>
+/* ============================================================
+   设计令牌（浅色 / 深色两套，深色为独立选定的档位，非自动反色）
+   ============================================================ */
+:root {
+  color-scheme: light;
+  --page:           #f9f9f7;   /* 页面底色 */
+  --surface-1:      #fcfcfb;   /* 卡片 / 图表表面 */
+  --text-primary:   #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted:     #898781;
+  --grid:           #e1e0d9;   /* 网格线（hairline） */
+  --axis:           #c3c2b7;   /* 基线 / 轴 */
+  --border:         rgba(11,11,11,0.10);
+  --series-off:     #2a78d6;   /* 分类槽 1：off 基线 / 查询表达层 */
+  --series-soft:    #008300;   /* 分类槽 2：soft 时间感知 */
+  --delta-good:     #006300;
+  --code-bg:        #f3f2ee;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page:           #0d0d0d;
+    --surface-1:      #1a1a19;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --grid:           #2c2c2a;
+    --axis:           #383835;
+    --border:         rgba(255,255,255,0.10);
+    --series-off:     #3987e5;
+    --series-soft:    #008300;
+    --delta-good:     #0ca30c;
+    --code-bg:        #232322;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page:           #0d0d0d;
+  --surface-1:      #1a1a19;
+  --text-primary:   #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted:     #898781;
+  --grid:           #2c2c2a;
+  --axis:           #383835;
+  --border:         rgba(255,255,255,0.10);
+  --series-off:     #3987e5;
+  --series-soft:    #008300;
+  --delta-good:     #0ca30c;
+  --code-bg:        #232322;
+}
+
+/* ============================================================
+   基础排版
+   ============================================================ */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--text-primary);
+  font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 15px;
+  line-height: 1.75;
+  -webkit-font-smoothing: antialiased;
+}
+main { max-width: 1060px; margin: 0 auto; padding: 24px 24px 96px; }
+section { margin-top: 56px; }
+h1 { font-size: 30px; line-height: 1.3; margin: 0 0 6px; letter-spacing: -0.01em; }
+h2 { font-size: 21px; margin: 0 0 4px; letter-spacing: -0.01em; }
+h3 { font-size: 16.5px; margin: 28px 0 8px; }
+p  { margin: 10px 0; color: var(--text-secondary); }
+p.lead { font-size: 15.5px; }
+strong { color: var(--text-primary); font-weight: 600; }
+code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: var(--text-primary);
+}
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  line-height: 1.65;
+}
+pre code { background: none; border: none; padding: 0; font-size: 12.5px; }
+
+.kicker {
+  font-size: 12px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--series-soft);
+  margin: 0 0 6px;
+}
+.section-head { margin-bottom: 12px; }
+.section-head .rule { height: 1px; background: var(--grid); margin-top: 14px; }
+
+/* 头部 */
+header.doc-head { padding-top: 40px; }
+header.doc-head .meta {
+  color: var(--text-muted); font-size: 13px; margin-top: 14px;
+  display: flex; flex-wrap: wrap; gap: 6px 18px;
+}
+header.doc-head .meta span::before { content: "·"; margin-right: 18px; color: var(--text-muted); }
+header.doc-head .meta span:first-child::before { content: ""; margin: 0; }
+
+/* 主题切换 */
+.theme-switch {
+  position: absolute; top: 18px; right: 24px;
+  display: inline-flex; border: 1px solid var(--border); border-radius: 8px;
+  overflow: hidden; background: var(--surface-1); font-size: 12px;
+}
+.theme-switch button {
+  border: 0; background: none; color: var(--text-secondary);
+  padding: 5px 12px; cursor: pointer; font: inherit;
+}
+.theme-switch button[aria-pressed="true"] {
+  background: var(--code-bg); color: var(--text-primary); font-weight: 600;
+}
+
+/* 目录导航 */
+nav.toc {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-top: 20px; padding-bottom: 4px;
+}
+nav.toc a {
+  font-size: 12.5px; text-decoration: none; color: var(--text-secondary);
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 3px 12px; background: var(--surface-1);
+}
+nav.toc a:hover { color: var(--text-primary); border-color: var(--axis); }
+
+/* 卡片 */
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px 22px;
+  margin: 14px 0;
+}
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+@media (max-width: 860px) { .grid-2, .grid-4 { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 560px) { .grid-2, .grid-4 { grid-template-columns: 1fr; } }
+
+/* 问题卡片 */
+.challenge .tag {
+  display: inline-block; font-size: 11.5px; font-weight: 700; letter-spacing: 0.04em;
+  color: var(--text-muted); margin-bottom: 6px;
+}
+.challenge h3 { margin: 2px 0 6px; font-size: 15.5px; }
+.challenge p { margin: 4px 0; font-size: 13.5px; }
+.challenge .answer {
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--grid);
+  font-size: 13.5px; color: var(--text-secondary);
+}
+.challenge .answer::before {
+  content: "应对"; font-size: 11.5px; font-weight: 700; color: var(--series-soft);
+  display: block; margin-bottom: 2px; letter-spacing: 0.04em;
+}
+
+/* 核心原则大卡 */
+.principle {
+  border-left: 3px solid var(--series-soft);
+  font-size: 16px; color: var(--text-primary);
+  padding: 18px 22px;
+}
+.principle em { font-style: normal; font-weight: 700; }
+
+/* 统计瓦片（KPI 行） */
+.stat {
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px 18px;
+}
+.stat .label { font-size: 12.5px; color: var(--text-secondary); }
+.stat .value { font-size: 30px; font-weight: 650; color: var(--text-primary); line-height: 1.2; margin: 4px 0 2px; }
+.stat .delta { font-size: 12.5px; color: var(--delta-good); font-weight: 600; }
+.stat .base  { font-size: 12px; color: var(--text-muted); }
+
+/* 流程图（纯 CSS 步骤） */
+.flow { display: flex; flex-direction: column; gap: 0; }
+.flow-row { display: flex; align-items: stretch; gap: 0; }
+.flow-node {
+  flex: 1; background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 14px; min-width: 0;
+}
+.flow-node .step { font-size: 11px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.05em; }
+.flow-node .name { font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
+.flow-node .desc { font-size: 12.5px; color: var(--text-secondary); line-height: 1.55; }
+.flow-node.temporal { border-color: color-mix(in srgb, var(--series-soft) 45%, var(--surface-1)); }
+.flow-node.temporal .name::after {
+  content: "时间感知层"; font-size: 10px; font-weight: 700; color: var(--series-soft);
+  border: 1px solid color-mix(in srgb, var(--series-soft) 45%, var(--surface-1));
+  border-radius: 4px; padding: 0 5px; margin-left: 8px; vertical-align: 1px;
+}
+.flow-node.dual { border-color: color-mix(in srgb, var(--series-off) 45%, var(--surface-1)); }
+.flow-node.dual .name::after {
+  content: "查询表达层"; font-size: 10px; font-weight: 700; color: var(--series-off);
+  border: 1px solid color-mix(in srgb, var(--series-off) 45%, var(--surface-1));
+  border-radius: 4px; padding: 0 5px; margin-left: 8px; vertical-align: 1px;
+}
+.flow-arrow {
+  align-self: center; color: var(--text-muted); font-size: 15px;
+  padding: 0 8px; flex: none; line-height: 1;
+}
+.flow-split { display: flex; gap: 12px; }
+.flow-split .flow-branch { flex: 1; display: flex; align-items: center; gap: 10px; }
+.flow-branch-label { font-size: 11px; color: var(--text-muted); flex: none; width: 96px; text-align: right; }
+
+/* 走查步骤序号 */
+.trace-step {
+  display: flex; gap: 12px; align-items: flex-start;
+  margin: 14px 0;
+}
+.trace-step .no {
+  flex: none; width: 26px; height: 26px; border-radius: 999px;
+  border: 1px solid var(--axis); color: var(--text-secondary);
+  font-size: 12.5px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  margin-top: 3px; background: var(--surface-1);
+}
+.trace-step .body { flex: 1; min-width: 0; }
+.trace-step .body h4 { margin: 0 0 4px; font-size: 14px; color: var(--text-primary); }
+.trace-step .body p { margin: 4px 0; font-size: 13.5px; }
+
+/* 约束类型表 */
+table {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+  margin: 12px 0 4px;
+}
+th, td {
+  text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--grid);
+  vertical-align: top; color: var(--text-secondary);
+}
+th { color: var(--text-muted); font-weight: 600; font-size: 12px; border-top: 1px solid var(--grid); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.win { color: var(--delta-good); font-weight: 650; font-variant-numeric: tabular-nums; }
+caption { caption-side: top; text-align: left; font-size: 12px; color: var(--text-muted); padding-bottom: 6px; }
+
+/* ============================================================
+   图表（纯 HTML/CSS 条形图）
+   ============================================================ */
+.chart-card { padding: 18px 20px 14px; }
+.chart-title { font-size: 14.5px; font-weight: 650; color: var(--text-primary); margin: 0; }
+.chart-sub   { font-size: 12px; color: var(--text-muted); margin: 2px 0 12px; }
+
+.legend { display: flex; gap: 18px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+.legend .key { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-secondary); }
+.legend .swatch { width: 14px; height: 10px; border-radius: 3px; display: inline-block; }
+.legend .swatch.off  { background: var(--series-off); }
+.legend .swatch.soft { background: var(--series-soft); }
+
+/* —— 纵向分组柱状图 —— */
+.columns { --plot-h: 220px; position: relative; padding-left: 40px; }
+.col-gridlines { position: absolute; top: 0; left: 40px; right: 0; height: var(--plot-h); }
+.col-gridlines .gl { position: absolute; left: 0; right: 0; height: 1px; background: var(--grid); }
+.col-plot {
+  position: relative; display: flex; justify-content: space-around; align-items: flex-end;
+  height: var(--plot-h); border-bottom: 1px solid var(--axis);
+}
+.col-group { display: flex; align-items: flex-end; gap: 2px; height: 100%; }
+.col-group .hit { padding: 0 5px; display: flex; align-items: flex-end; height: 100%; }
+.bar-col {
+  width: 20px; border-radius: 4px 4px 0 0;
+  position: relative; transition: filter .12s ease;
+}
+.bar-col.off  { background: var(--series-off); }
+.bar-col.soft { background: var(--series-soft); }
+.hit:hover .bar-col, .hit:focus-visible .bar-col { filter: brightness(1.12); }
+.hit:focus-visible { outline: 2px solid var(--axis); outline-offset: 2px; border-radius: 4px; }
+.bar-col .cap {
+  position: absolute; top: -19px; left: 50%; transform: translateX(-50%);
+  font-size: 11px; color: var(--text-secondary); white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.col-x { display: flex; justify-content: space-around; padding: 6px 0 0; }
+.col-x .cat { font-size: 12px; color: var(--text-secondary); text-align: center; max-width: 120px; }
+.y-axis { position: absolute; top: 0; left: 40px; right: 0; height: var(--plot-h); pointer-events: none; }
+.y-axis .tick {
+  position: absolute; left: -40px; width: 32px; text-align: right;
+  transform: translateY(50%); font-size: 11px; color: var(--text-muted);
+  font-variant-numeric: tabular-nums; bottom: var(--p);
+}
+
+/* —— 横向分组条形图 —— */
+.hbars { position: relative; padding: 0 0 22px 118px; }
+.hb-gridlines { position: absolute; top: 0; bottom: 22px; left: 118px; right: 0; }
+.hb-gridlines .gl { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--grid); }
+.hb-gridlines .gl.base { background: var(--axis); left: 0; }
+.hb-plot { position: relative; display: flex; flex-direction: column; gap: 12px; }
+.hb-row { display: flex; align-items: center; min-height: 44px; }
+.hb-cat {
+  position: absolute; left: -118px; width: 104px;
+  font-size: 12.5px; color: var(--text-secondary); text-align: right; line-height: 1.4;
+}
+.hb-pair { display: flex; flex-direction: column; gap: 2px; width: 100%; }
+.hb-pair .hit { padding: 4px 0; }
+.bar-h {
+  height: 13px; border-radius: 0 4px 4px 0; position: relative;
+  min-width: 2px; transition: filter .12s ease;
+}
+.bar-h.off  { background: var(--series-off); }
+.bar-h.soft { background: var(--series-soft); }
+.hit:hover .bar-h, .hit:focus-visible .bar-h { filter: brightness(1.12); }
+.hit:focus-visible { outline: 2px solid var(--axis); outline-offset: 2px; border-radius: 4px; }
+.bar-h .tip {
+  position: absolute; left: calc(100% + 7px); top: 50%; transform: translateY(-50%);
+  font-size: 11px; color: var(--text-secondary); white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.hb-x { position: absolute; left: 118px; right: 0; bottom: 0; height: 18px; }
+.hb-x .tick {
+  position: absolute; transform: translateX(-50%);
+  font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; top: 4px;
+}
+
+/* 悬浮提示（数值不依赖它：直接标注 + 表格视图兜底） */
+#tooltip {
+  position: fixed; z-index: 10; pointer-events: none;
+  background: var(--surface-1); border: 1px solid var(--axis); border-radius: 8px;
+  padding: 7px 11px; font-size: 12.5px; color: var(--text-secondary);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.14);
+  opacity: 0; transition: opacity .08s ease; max-width: 260px;
+}
+#tooltip .val { font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+#tooltip .row { display: flex; align-items: center; gap: 7px; }
+#tooltip .key { display: inline-block; width: 12px; height: 2px; border-radius: 1px; }
+
+/* 结论 / 警示框 */
+.callout { border-left: 3px solid var(--axis); padding: 4px 18px; }
+.callout.green { border-left-color: var(--series-soft); }
+.callout p { font-size: 13.5px; }
+
+/* forced-colors 兜底：条形加描边保形状 */
+@media (forced-colors: active) {
+  .bar-col, .bar-h { border: 1px solid CanvasText; }
+}
+
+/* 窄屏：图表留出横向余量，避免数值标注溢出 */
+@media (max-width: 560px) {
+  .chart-card { padding: 16px 12px 12px; overflow-x: hidden; }
+  .col-group .hit { padding: 0 3px; }
+  .bar-col { width: 16px; }
+  .hbars { padding-left: 0; padding-bottom: 22px; }
+  .hb-cat { position: static; width: auto; text-align: left; margin-bottom: 4px; }
+  .hb-row { flex-direction: column; align-items: stretch; gap: 4px; }
+  .hb-gridlines { left: 0; }
+  .hb-x { left: 0; }
+}
+
+footer {
+  margin-top: 72px; padding-top: 18px; border-top: 1px solid var(--grid);
+  font-size: 12.5px; color: var(--text-muted);
+}
+</style>
+</head>
+<body>
+<div id="tooltip" role="status" aria-hidden="true"></div>
+
+<div class="theme-switch" role="group" aria-label="配色切换">
+  <button id="theme-auto" aria-pressed="true">跟随系统</button>
+  <button id="theme-light" aria-pressed="false">浅色</button>
+  <button id="theme-dark" aria-pressed="false">深色</button>
+</div>
+
+<main>
+<header class="doc-head">
+  <p class="kicker">Agent Memory API · V3.1 时间感知检索 + 双通道查询</p>
+  <h1>时间感知检索方案说明</h1>
+  <p class="lead">
+    本地可部署的长期对话记忆服务：SQLite 持久化 + ONNX 语义召回 + 可选 LLM 索引增强。
+    方案的核心命题是——<strong>让"用户上个月说过不吃什么""搬家之前住哪"这类时间限定查询可被正确检索</strong>，
+    并保证这一切<strong>不因 LLM 的不确定性而劣化任何非时间查询</strong>。
+    全部设计围绕一条主线：<strong>把不可靠的部分（LLM）压缩到最小职责面，把可靠的部分（时序计算）全部纯函数化，
+    扩展文本以"双通道取最大分"接入使它只能提分不能稀释，并让任何一层失败都能安全降级</strong>。
+  </p>
+  <div class="meta">
+    <span>代码基线：main @ 59a73ad（备份标签 v3-baseline）</span>
+    <span>文档生成：2026-09-28</span>
+    <span>测试实测：97 passed</span>
+  </div>
+  <nav class="toc" aria-label="目录">
+    <a href="#summary">摘要</a>
+    <a href="#problem">问题定义</a>
+    <a href="#architecture">架构与数据流</a>
+    <a href="#walkthrough">用例走查</a>
+    <a href="#idea1">抽取与解析分层</a>
+    <a href="#idea2">软打分</a>
+    <a href="#idea3">程序化防御</a>
+    <a href="#dual">双通道查询</a>
+    <a href="#evidence">实证</a>
+    <a href="#engineering">工程底座</a>
+    <a href="#testing">质量保障</a>
+    <a href="#limits">边界与披露</a>
+  </nav>
+</header>
+
+<!-- ================================================================ -->
+<section id="summary">
+  <div class="section-head">
+    <p class="kicker">0 · 摘要</p>
+    <h2>一句话方案与核心结果</h2>
+    <div class="rule"></div>
+  </div>
+
+  <div class="card principle">
+    <em>设计主线：</em>LLM 只负责把自然语言里的相对时间表达<u>抽取</u>为受控结构（方向、数量、单位、事件短语），
+    <u>绝不</u>知道当前时间、<u>绝不</u>换算日期；绝对时间窗口、衰减打分、窗口过滤全部由
+    <code>app/temporal.py</code> 的确定性纯函数计算；每条 LLM 声称的约束都要过
+    <u>schema 校验、原文正则回查、锚点置信度</u>三道防线，任何一道不过就整条丢弃、退回常规检索；
+    扩展文本与裸查询构成<u>双通道</u>、逐记录取较大分——扩展只能提升证据、永不稀释；
+    <code>TEMPORAL_MODE=off</code> 或 <code>QUERY_DUAL_CHANNEL=false</code> 时打分路径与旧行为<em>逐位一致</em>。
+  </div>
+
+  <div class="chart-sub" style="margin:18px 0 8px">
+    A/B 实验（同一批 15 例时间歧义数据，仅切换 <code>TEMPORAL_MODE</code>，oracle 抽取层隔离，固定测量纪元可复现）：
+  </div>
+  <div class="grid-4">
+    <div class="stat">
+      <div class="label">Hit@1（目标排第一）</div>
+      <div class="value">80.0%</div>
+      <div class="delta">↑ +60.0 pp</div>
+      <div class="base">off 基线 20.0%</div>
+    </div>
+    <div class="stat">
+      <div class="label">Hit@k（k=5 内命中）</div>
+      <div class="value">93.3%</div>
+      <div class="delta">↑ +20.0 pp</div>
+      <div class="base">off 基线 73.3%</div>
+    </div>
+    <div class="stat">
+      <div class="label">MRR@k（倒数排名均值）</div>
+      <div class="value">0.867</div>
+      <div class="delta">↑ +0.400</div>
+      <div class="base">off 基线 0.467</div>
+    </div>
+    <div class="stat">
+      <div class="label">目标压过分心项</div>
+      <div class="value">93.3%</div>
+      <div class="delta">↑ +53.3 pp</div>
+      <div class="base">off 基线 40.0%</div>
+    </div>
+  </div>
+  <p style="font-size:12.5px; color:var(--text-muted); margin-top:8px">
+    指标定义与逐例数据见<a href="#evidence">实证节</a>；oracle 模式衡量的是<u>打分层上界</u>（抽取正确前提下的增益），不是真实 LLM 端到端成绩。
+    想直接看"一条查询进来之后系统做了什么"，跳到<a href="#walkthrough">用例走查</a>。
+  </p>
+</section>
+
+<!-- ================================================================ -->
+<section id="problem">
+  <div class="section-head">
+    <p class="kicker">1 · 问题定义</p>
+    <h2>时间序列推理检索，难在四个具体的地方</h2>
+    <div class="rule"></div>
+  </div>
+  <p>
+    评测场景是长期多轮对话：同一主题、不同时间点的记忆共存于库中
+    （"上个月报了陶艺课"与"这周开始玩陆冲板"），查询带时间限定（"最近一周的新爱好是什么？"）。
+    纯语义检索对这类查询是<u>结构性失明</u>的——不是调参能解决，而是打分函数里根本没有时间这个输入。
+  </p>
+
+  <div class="grid-2">
+    <div class="card challenge">
+      <span class="tag">挑战 1</span>
+      <h3>语义向量对时间盲</h3>
+      <p>同内容、不同时间的两条记录语义分完全相同。旧实现的平局由
+      <code>created_at</code> 升序决定——旧记录排前面，恰好把时间限定查询答反。</p>
+      <p>A/B 数据中 <code>off</code> 模式 15 例里 12 例目标未排到第一，9 例被同主题分心项压过。</p>
+      <div class="answer">把时间匹配项 <code>time_match</code> 作为第三路加权分数引入，窗口内得 1.0、窗外按半衰期衰减。</div>
+    </div>
+    <div class="card challenge">
+      <span class="tag">挑战 2</span>
+      <h3>LLM 不知道现在几点</h3>
+      <p>若让 LLM 把"最近三个月"换算成绝对日期，它必须先知道当前日期——而评测契约里模型拿不到可靠时钟，猜日期必然系统性出错。</p>
+      <div class="answer">提示词明令禁止换算；LLM 只输出相对约束结构，绝对窗口由代码以<u>三级锚点</u>（对话前沿优先）解析。</div>
+    </div>
+    <div class="card challenge">
+      <span class="tag">挑战 3</span>
+      <h3>LLM 会幻觉时间约束</h3>
+      <p>查询根本没有时间含义时，模型仍可能"贴心地"输出一个时间窗口，把无关查询强行按时序重排。</p>
+      <div class="answer">三道程序化防线：schema 白名单校验、查询原文正则回查（<code>query_mentions_temporal</code>）、事件锚点置信度阈值；任何一道不过即丢弃约束。</div>
+    </div>
+    <div class="card challenge">
+      <span class="tag">挑战 4</span>
+      <h3>大量记忆没有时间戳</h3>
+      <p>评测消息常不带 <code>timestamp</code>。若时间未知即惩罚，这批记录会在所有时间查询中被错杀。</p>
+      <div class="answer">有效时间三级回退（消息时间戳 → 入库时间 → None）；打分时未知时间取<em>中性值 0.5，永不惩罚</em>；严格模式过滤时未知记录始终保留。</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ -->
+<section id="architecture">
+  <div class="section-head">
+    <p class="kicker">2 · 架构与数据流</p>
+    <h2>两条链路：写入先行落盘，检索可降级</h2>
+    <div class="rule"></div>
+  </div>
+
+  <p>9 个模块各司其职。时间感知层（绿色）与查询表达层（蓝色）只出现在检索链路，且都可整体旁路：</p>
+
+  <div class="card">
+    <h3 style="margin-top:0">Add 链路（<code>POST /set</code>）—— 契约：持久化完成且可检索后才返回 200</h3>
+    <div class="flow">
+      <div class="flow-row">
+        <div class="flow-node"><span class="step">1</span><div class="name">Schema 校验</div><div class="desc">双协议解析；<code>MAX_MEMORY_CHARS</code> 上限</div></div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node"><span class="step">2</span><div class="name">幂等占用</div><div class="desc"><code>claim_request</code>：request_id + payload_hash，冲突 409、重复返回幂等成功</div></div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node"><span class="step">3</span><div class="name">LLM 索引增强（可选）</div><div class="desc">V2 提示词生成事实保真的辅助索引文本；失败按 <code>LLM_FAILURE_MODE</code> 回退或 503</div></div>
+      </div>
+      <div class="flow-row" style="margin-top:10px">
+        <div class="flow-node"><span class="step">4</span><div class="name">向量化</div><div class="desc">FastEmbed / ONNX 多语言模型，L2 归一化；内容渲染为 <code>[user | 时间戳]</code> 参与嵌入</div></div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node"><span class="step">5</span><div class="name">complete_request 落盘</div><div class="desc">向量 BLOB + <code>source_timestamp</code>（缺失回退入库时间）+ 增强文本，单事务提交</div></div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node"><span class="step">6</span><div class="name">返回 200</div><div class="desc">回显三个 ID；失败则 <code>mark_failed</code> 允许安全重试</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Search 链路（<code>POST /get</code>）—— 契约：只返回记忆证据，不生成答案</h3>
+    <div class="flow">
+      <div class="flow-row">
+        <div class="flow-node"><span class="step">1</span><div class="name">查询扩展（可选）</div><div class="desc">V3 提示词：同义改写文本 + 结构化时间约束；<u>不回答问题、不换算日期</u></div></div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node dual"><span class="step">2</span><div class="name">双通道构建</div><div class="desc">裸查询与"查询+扩展文本"两路嵌入；<code>QUERY_DUAL_CHANNEL=false</code> 时退回单通道混合</div></div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node temporal"><span class="step">3</span><div class="name">幻觉守卫</div><div class="desc">schema 校验 + 原文正则回查时间信号，不过即整条丢弃</div></div>
+      </div>
+      <div class="flow-row" style="margin-top:10px">
+        <div class="flow-node temporal"><span class="step">4</span><div class="name">窗口解析</div><div class="desc">三级锚点（对话前沿优先）→ 纯函数算绝对窗口；事件锚定走两阶段检索定位边界</div></div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node"><span class="step">5</span><div class="name">三路混合打分</div><div class="desc">每个通道各算 语义+词法+时间，逐记录<u>取两通道较大值</u>；无窗口时与旧版权重逐位一致</div></div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node"><span class="step">6</span><div class="name">阈值与过滤</div><div class="desc"><code>MIN_RELEVANCE_SCORE</code> 门槛（任一通道过线即入围）；strict 模式窗口内候选足够时截掉窗外记录</div></div>
+      </div>
+      <div class="flow-row" style="margin-top:10px">
+        <div class="flow-node temporal"><span class="step">7</span><div class="name">首末次排序</div><div class="desc">"第一次/最后一次"查询按时间排序，时间未知排最后；否则按 分数 → created_at → id</div></div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node"><span class="step">8</span><div class="name">top_k 截断返回</div><div class="desc">证据按分数降序返回；响应只有 id / content / score / created_at</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout green">
+    <p><strong>降级路径是设计的一部分，不是兜底补丁：</strong>LLM 不可用 → 纯向量检索；
+    约束不可信 → 丢约束退常规检索；锚点找不到 → 放弃事件窗口；扩展有害 → 双通道让裸查询通道兜底；
+    <code>TEMPORAL_MODE=off</code> / <code>QUERY_DUAL_CHANNEL=false</code> → 与旧行为逐位一致。
+    每一层失败都落到一个<u>已验证过的行为</u>上，而不是落到未定义状态。</p>
+  </div>
+</section>
+
+<!-- ================================================================ -->
+<section id="walkthrough">
+  <div class="section-head">
+    <p class="kicker">3 · 用例走查</p>
+    <h2>给定一个用例，系统到底做了什么</h2>
+    <div class="rule"></div>
+  </div>
+
+  <p>
+    下面用一条真实运行的查询把两条链路完整走一遍。<strong>本节所有中间值（扩展输出、锚点分数、
+    每条记录的双通道得分、time_match、最终排名、响应）都来自真实 FastEmbed 多语言向量模型的一次实际执行</strong>，
+    由 <code>scripts/trace_walkthrough.py</code> 产出（<code>python -m scripts.trace_walkthrough</code> 可一键复现）。
+    扩展 JSON 用与 V3 提示词输出同构的桩注入，保证走查离线可复现；生产环境中这一步由 LLM 生成，后续处理完全相同。
+  </p>
+
+  <div class="card">
+    <h3 style="margin-top:0">用例设定</h3>
+    <p style="font-size:13.5px">user-1 名下已通过 <code>POST /set</code> 写入三条记忆（写入链路的 6 步已走完，向量已落盘）：</p>
+    <table>
+      <tr><th>#</th><th>记忆内容（渲染后参与嵌入的形式）</th><th>距"现在"</th><th>事件时间</th></tr>
+      <tr><td class="num">1</td><td><code>[user | 2027-01-08T08:00:00.000Z] 我上周搬进了滨江路的新公寓。</code></td><td class="num">7 天前</td><td>搬家（事件）</td></tr>
+      <tr><td class="num">2</td><td><code>[user | 2027-01-12T08:00:00.000Z] 我在新家养了一只虎皮鹦鹉，取名叫团团。</code></td><td class="num">3 天前</td><td>目标答案</td></tr>
+      <tr><td class="num">3</td><td><code>[user | 2026-12-01T08:00:00.000Z] 住在老房子的时候我养过一只仓鼠。</code></td><td class="num">45 天前</td><td>分心项（搬家之前）</td></tr>
+    </table>
+    <p style="font-size:13.5px">随后平台发来检索请求：</p>
+<pre><code>POST /get
+{"query": "搬到滨江路之后我养了什么宠物？", "user_id": "user-1", "top_k": 100}</code></pre>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Search 链路逐步执行</h3>
+
+    <div class="trace-step">
+      <span class="no">1</span>
+      <div class="body">
+        <h4>查询扩展（V3 提示词）</h4>
+        <p>LLM 只做两件事：改述检索目标、抽取<u>相对</u>时间约束——它不知道当前日期，也不换算：</p>
+<pre><code>{"expanded_query": "搬到滨江路之后养的宠物；新家养的动物",
+ "temporal": {"windows": [],
+              "event_anchor": {"event": "搬到滨江路", "direction": "after"},
+              "ordering": null}}</code></pre>
+      </div>
+    </div>
+
+    <div class="trace-step">
+      <span class="no">2</span>
+      <div class="body">
+        <h4>双通道构建（查询表达层）</h4>
+        <p>两条查询文本在同一次 embed 调用中向量化：</p>
+<pre><code>通道A（裸查询）: "搬到滨江路之后我养了什么宠物？"
+通道B（含扩展）: "搬到滨江路之后我养了什么宠物？\n查询扩展：搬到滨江路之后养的宠物；新家养的动物"</code></pre>
+        <p style="font-size:13px">设计动机：若把扩展文本并入单一嵌入（V3 原行为），多出的词会<u>稀释</u>余弦与词法重合度，
+        把弱相关证据挤到相关度地板之下——多跳测量中这一现象让链完整率掉了 13.3 个百分点（见<a href="#dual">双通道节</a>）。</p>
+      </div>
+    </div>
+
+    <div class="trace-step">
+      <span class="no">3</span>
+      <div class="body">
+        <h4>幻觉守卫</h4>
+        <p>LLM 声称存在时间约束，于是用正则回查查询原文："之后"命中中英时间信号 → <strong>通过</strong>。
+        若查询是"我家的宠物是什么？"这类无时间语义的查询，此步直接丢弃约束、退回常规检索。</p>
+      </div>
+    </div>
+
+    <div class="trace-step">
+      <span class="no">4</span>
+      <div class="body">
+        <h4>事件锚定：两阶段检索定位窗口边界</h4>
+        <p>"之后"的参照事件不在查询里，而在库中。事件短语 <code>"搬到滨江路"</code> 单独向量化，与三条记录打语义+词法分：</p>
+        <table>
+          <tr><th>记录</th><th class="num">锚点匹配分</th><th>说明</th></tr>
+          <tr><td>① 搬进滨江路新公寓（7 天前）</td><td class="num win">0.4975</td><td>最佳命中 &gt; 置信阈值 0.30 → 采纳为边界</td></tr>
+          <tr><td>② 新家养虎皮鹦鹉（3 天前）</td><td class="num">0.1869</td><td>低于阈值</td></tr>
+          <tr><td>③ 老房子养过仓鼠（45 天前）</td><td class="num">0.1395</td><td>低于阈值</td></tr>
+        </table>
+        <p style="font-size:13px">边界 = 搬家记录的事件时间 <code>2027-01-08T08:00:00.000Z</code>。
+        direction=after → 窗口 <code>[边界, +∞)</code>，<u>硬边界</u>——窗外记录不享受近距离软衰减。
+        若三记录最高分仍 &lt; 0.30，则放弃约束退回常规检索，不猜测边界。</p>
+      </div>
+    </div>
+
+    <div class="trace-step">
+      <span class="no">5</span>
+      <div class="body">
+        <h4>三路混合打分：每通道各打分、逐记录取较大值</h4>
+        <p>窗口存在 → 权重从 (0.8, 0.2) 三路归一化为 <code>(w_sem, w_lex, w_time) = (0.6667, 0.1667, 0.1667)</code>。
+        每条记录在两个通道各算一次总分（均含时间项），取较大者：</p>
+        <table>
+          <tr><th>记录</th><th class="num">通道A</th><th class="num">通道B</th><th class="num">time_match</th><th class="num">最终分 = max(A,B)</th><th class="num">排名</th></tr>
+          <tr><td>② 虎皮鹦鹉（3 天前，窗口内）</td><td class="num">0.4818</td><td class="num win">0.4989</td><td class="num">1.0</td><td class="num win">0.4989</td><td class="num">1</td></tr>
+          <tr><td>① 搬进滨江路（7 天前，窗口起点）</td><td class="num win">0.4634</td><td class="num">0.4559</td><td class="num">1.0</td><td class="num">0.4634</td><td class="num">2</td></tr>
+          <tr><td>③ 仓鼠（45 天前，窗口外硬边界）</td><td class="num win">0.3326</td><td class="num">0.3140</td><td class="num">0.0</td><td class="num">0.3326</td><td class="num">3</td></tr>
+        </table>
+        <p style="font-size:13px"><strong>三个读数：</strong>
+        ① 目标记录（鹦鹉）在<u>通道B</u>拿到最高分——扩展改述"新家养的动物"把它的分从 0.4818 抬到 0.4989，
+        这就是"扩展只能提分"的数学性质在真实向量上的体现；
+        ② 分心项（仓鼠）与查询同样语义相关，但它在搬家之前 → 硬边界 time_match=0，
+        时间项把目标与它的差距拉大 0.1667；
+        ③ 搬家记录是锚点本身，"之后"的窗口起点含事件（半开区间），它作为上下文正常返回、排第 2。</p>
+      </div>
+    </div>
+
+    <div class="trace-step">
+      <span class="no">6</span>
+      <div class="body">
+        <h4>阈值、排序与返回</h4>
+        <p>三条记录均高于 <code>MIN_RELEVANCE_SCORE=0.20</code> 地板；无 ordering 约束 → 按分数降序；
+        <code>top_k</code> 截断后返回证据（真实响应）：</p>
+<pre><code>{"data": [
+  {"id": "mem_707fe973885f1c8c19e3a9ac", "content": "[user | 2027-01-12T08:00:00.000Z]\n我在新家养了一只虎皮鹦鹉，取名叫团团。",
+   "score": 0.49889,  "created_at": "2027-01-12T08:00:00.000Z"},
+  {"id": "mem_7f7636148e68f837f8dbd80a", "content": "[user | 2027-01-08T08:00:00.000Z]\n我上周搬进了滨江路的新公寓。",
+   "score": 0.463431, "created_at": "2027-01-08T08:00:00.000Z"},
+  {"id": "mem_fb123fdadef110e23088ac02", "content": "[user | 2026-12-01T08:00:00.000Z]\n住在老房子的时候我养过一只仓鼠。",
+   "score": 0.332567, "created_at": "2026-12-01T08:00:00.000Z"}
+]}</code></pre>
+        <p style="font-size:13px">平台的回答模型拿到这组证据即可串出答案"虎皮鹦鹉，叫团团"——
+        本系统只负责把<u>正确时间的正确证据</u>排到前面。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout">
+    <p><strong>如果关掉这些机制会发生什么：</strong>无时间项时三条记录按纯语义分排序，仓鼠（养宠物）与鹦鹉的
+    语义差距远小于 0.1667，"搬家之后"的语义会被完全忽略，答案顺序不再可靠——这正是 A/B 中
+    <code>off</code> 模式事件类 Hit@1 为 0% 的机制；无双通道时扩展文本会稀释嵌入，弱证据可能直接掉到地板之下。</p>
+  </div>
+</section>
+
+<!-- ================================================================ -->
+<section id="idea1">
+  <div class="section-head">
+    <p class="kicker">4 · 核心思路一</p>
+    <h2>LLM 只抽取，代码来解析 —— 把"知道时间"和"计算时间"彻底分离</h2>
+    <div class="rule"></div>
+  </div>
+
+  <p>
+    直接问 LLM"最近三个月是哪段时间"会同时踩中挑战 2 和 3。本方案把时间处理切成两个职责面：
+  </p>
+  <ul style="color:var(--text-secondary)">
+    <li><strong>抽取层（LLM，不可靠但擅长理解自然语言）：</strong>从查询中抽出相对时间意图，输出受控 JSON——滚动窗口、日历窗口、事件锚点、首末次排序四选一；提示词明文规定"不得换算绝对日期，你不知道当前时间"。</li>
+    <li><strong>解析层（纯函数，可靠且可离线单元测试）：</strong><code>app/temporal.py</code> 全部函数无网络调用、无模型推理，把相对约束解析为绝对毫秒窗口。</li>
+  </ul>
+
+  <h3>四种受控约束类型</h3>
+  <table>
+    <caption>temporal 字段的 schema 白名单（app/prompts.py V3 提示词 ↔ app/temporal.py parse_temporal 双向对齐）</caption>
+    <tr><th>类型</th><th>结构</th><th>例句</th><th>解析结果</th></tr>
+    <tr><td><strong>滚动窗口</strong></td><td><code>{"kind":"rolling","unit":"day|week|month|year","amount":N,"direction":"past|future"}</code></td><td>"最近三天"</td><td>[锚点−3d, 锚点]，天/周用 timedelta，<u>月/年必须日历运算</u></td></tr>
+    <tr><td><strong>日历窗口</strong></td><td><code>{"kind":"calendar","unit":"...","offset":N}</code></td><td>"上个月"</td><td>锚点所在月起步移 offset=−1，即整月窗口；"上上周"= week/−2</td></tr>
+    <tr><td><strong>事件锚点</strong></td><td><code>{"event":"搬家到上海","direction":"before|after"}</code></td><td>"搬家之前我住哪"</td><td>两阶段检索定位事件记录，以其事件时间为窗口边界，<u>硬边界</u></td></tr>
+    <tr><td><strong>首末次排序</strong></td><td><code>{"ordering":"earliest|latest"}</code></td><td>"我第一次提到 Aurora"</td><td>不产生窗口，只改变候选排序；时间未知排最后</td></tr>
+  </table>
+
+  <h3>三级锚点：为什么"对话前沿"优先于服务器时钟</h3>
+  <p>
+    相对窗口必须有一个"现在"作参照。<u>服务器时钟</u>是墙上时间，但对话时间线可能落后于它
+    （用户最后一条消息是 3 天前入库的）。<code>resolve_anchor</code> 的选择顺序是：
+  </p>
+  <table>
+    <tr><th>#</th><th>锚点来源</th><th>条件</th><th>代码</th></tr>
+    <tr><td class="num">1</td><td><strong>对话前沿</strong>：该 user 全部记录的最大有效事件时间</td><td>库里有任一时间信息</td><td><code>max(known)</code>（<code>resolve_anchor</code>）</td></tr>
+    <tr><td class="num">2</td><td>服务器时钟</td><td>全库无任何时间信息</td><td><code>now_ms</code></td></tr>
+  </table>
+  <p style="font-size:13px">
+    记录级有效时间同样两级回退：消息自带 <code>source_timestamp</code> 优先，否则解析入库时间
+    <code>created_at</code>（<code>effective_time_ms</code>）。这意味着
+    <u>"最近三天"以用户对话世界的"现在"为终点</u>，而不是进程的墙上时钟。
+  </p>
+
+  <h3>日历运算的确定性细节</h3>
+  <ul style="color:var(--text-secondary); font-size:13.5px">
+    <li>月/年窗口用 <code>_shift_months</code> 日历平移，<u>月末日期按目标月天数收敛</u>（5 月 31 日 − 1 月 → 4 月 30 日；2 月按闰年收敛）——单元测试固定覆盖；</li>
+    <li>周窗口以周一为起点；日/周用 <code>timedelta</code>；<u>拒绝</u>用 30 天近似一个月；</li>
+    <li>窗口为半开区间 <code>[start, end)</code>，边界语义写进类型（<code>TemporalWindow.contains</code>）。</li>
+  </ul>
+</section>
+
+<!-- ================================================================ -->
+<section id="idea2">
+  <div class="section-head">
+    <p class="kicker">5 · 核心思路二</p>
+    <h2>软打分：奖励匹配而不是惩罚失配</h2>
+    <div class="rule"></div>
+  </div>
+
+  <p>解析出窗口后，时间进入打分函数。默认软模式下，每个通道的总分是三路加权和：</p>
+  <pre><code># app/service.py  _score_record + 双通道取最大
+score(通道) = w_sem·语义余弦 + w_lex·词法重合 + w_time·time_match
+final = max(score(通道A), score(通道B))
+
+# 有时间窗口时三路归一化（默认 0.8/0.2/0.2 → /1.2 → 0.667/0.167/0.167）
+# 无时间窗口时退回二元权重 (0.8, 0.2) + 0.0 —— 与旧实现逐位一致</code></pre>
+
+  <h3><code>time_match</code> 的四条规则（temporal.py <code>time_match</code>）</h3>
+  <table>
+    <tr><th>情形</th><th>得分</th><th>设计理由</th></tr>
+    <tr><td>窗口内</td><td class="win">1.0</td><td>满奖励</td></tr>
+    <tr><td>窗口外（软窗口）</td><td class="num">exp(−ln2 · 距离天数 / 半衰期)</td><td>离窗口一天之遥和一年之遥不该同罪；默认半衰期 30 天，距离一个半衰期得分 ≈ 0.5</td></tr>
+    <tr><td>时间未知</td><td class="num">0.5</td><td><strong>中性值而非惩罚值</strong>——无时间戳记忆不能在时间查询中被错杀（0.5 恰是奖惩中点）</td></tr>
+    <tr><td>窗口外（硬边界，事件锚定）</td><td class="num">0</td><td>"搬家之前"语义上明确不含搬家之后，窗外不享受近距离软衰减</td></tr>
+  </table>
+
+  <h3>软 / 严格两档</h3>
+  <div class="grid-2">
+    <div class="card">
+      <h3 style="margin-top:0"><code>TEMPORAL_MODE=soft</code>（默认）</h3>
+      <p style="font-size:13.5px">时间只参与加权。窗口外记录仍可凭高语义分入围——适合时间信号本身可能不可靠的场景，代价是分心项偶尔仍会入围（但排序被压低）。</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0"><code>TEMPORAL_MODE=strict</code></h3>
+      <p style="font-size:13.5px">窗口内候选数 ≥ top_k 时直接截掉窗口外记录；<u>时间未知的记录始终保留</u>（<code>_apply_strict_temporal_filter</code>）。窗口内不够时不硬截，避免把响应截空。</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <p><strong>关键取舍：</strong>奖励式软打分 + 可选严格过滤，而不是一步到位的硬过滤。
+    硬过滤的前提是窗口解析永远正确——那是把挑战 2/3 的风险集中放大；软打分让时间项
+    <u>只改变相对排序</u>，即使约束解析错了，最坏结果也只是排序偏好偏离，不会凭空丢答案。</p>
+  </div>
+</section>
+
+<!-- ================================================================ -->
+<section id="idea3">
+  <div class="section-head">
+    <p class="kicker">6 · 核心思路三</p>
+    <h2>程序化防御：每一条 LLM 时间声明都要被验证</h2>
+    <div class="rule"></div>
+  </div>
+
+  <p>提示词约束<u>不构成</u>保证。所有可靠性都来自可测试的代码防线，按约束生命周期排布：</p>
+
+  <table>
+    <caption>防线链：一条时间约束从产生到生效要过的每一关（走查用例中的实际数值见第 3 节第 4 步）</caption>
+    <tr><th>#</th><th>防线</th><th>位置</th><th>不过时</th></tr>
+    <tr><td class="num">1</td><td><strong>提示词规则</strong>：只在"明确时间限定"时输出 temporal；禁止换算日期</td><td><code>prompts.py</code> V3</td><td>—（软约束，供 2/3 兜底）</td></tr>
+    <tr><td class="num">2</td><td><strong>schema 白名单</strong>：kind/unit/amount/offset/direction/ordering 逐字段校验，非法值整条丢弃（bool 被显式排除，不会当 1 用）</td><td><code>parse_temporal</code></td><td>返回 None，按无约束处理</td></tr>
+    <tr><td class="num">3</td><td><strong>原文回查</strong>：约束要生效，查询原文必须匹配中英时间信号正则——宁可误放（约束生效），不可误杀真时间查询</td><td><code>query_mentions_temporal</code>（由 <code>_resolve_temporal_context</code> 调用）</td><td>视为幻觉，整条丢弃</td></tr>
+    <tr><td class="num">4</td><td><strong>锚点置信度</strong>：事件短语定位到的最佳记录分数 &lt; <code>TEMPORAL_EVENT_ANCHOR_MIN_SCORE</code>(0.30) 时放弃约束</td><td><code>_resolve_event_anchor_window</code></td><td>退回常规检索，<u>不猜测边界</u></td></tr>
+    <tr><td class="num">5</td><td><strong>总开关旁路</strong>：<code>TEMPORAL_MODE=off</code> 时打分路径与旧版逐位一致</td><td><code>service.py</code> 全链路</td><td>—（回归安全阀）</td></tr>
+  </table>
+
+  <h3>事件锚定：两阶段检索</h3>
+  <p>"搬家之前我住哪"的窗口边界不在查询里，而在库里某条记忆的事件时间。解析分两步：</p>
+  <pre><code># service.py  _resolve_event_anchor_window
+① 事件短语（"搬到上海"）单独向量化
+② 与该 user 全部记录算 语义+词法 分（无时间项），取最高分记录的事件时间为边界
+   · direction=before → 窗口 (-∞, 事件时间)  硬边界（事件本身不含在"之前"里）
+   · direction=after  → 窗口 [事件时间, +∞)  硬边界
+③ 最高分 < 0.30 → 放弃约束，退回常规检索（不猜边界）</code></pre>
+  <p style="font-size:13px">
+    硬边界语义写进类型：窗外记录一律 0 分时间项，不因"距离窗口边界近"获得软衰减——
+    这是 A/B 实验驱动出的 V3.1 修复（原先事件记录本身会拿到接近满分的软衰减分、常排到真正答案之前）。
+  </p>
+</section>
+
+<!-- ================================================================ -->
+<section id="dual">
+  <div class="section-head">
+    <p class="kicker">7 · 查询表达层</p>
+    <h2>双通道查询：让扩展只能提分，永不稀释</h2>
+    <div class="rule"></div>
+  </div>
+
+  <p>
+    多跳测量门（15 例桥接实体场景 × 每例约 180 条程序化干扰记忆）发现一个反直觉事实：
+    <strong>V3 把扩展文本并入单一嵌入，会让余弦与词法重合度被稀释，把弱相关证据挤到
+    <code>MIN_RELEVANCE_SCORE</code> 地板之下</strong>——在多跳链式查询上，链完整率因此掉了 13.3 个百分点。
+    平台协议下系统只负责返回证据、由平台的回答模型串联多跳，因此"证据掉到地板之下"就是链断裂。
+  </p>
+
+  <h3>设计：max(通道A, 通道B)</h3>
+  <pre><code>final(record) = max( score(裸查询, record), score(裸查询+扩展文本, record) )   # 均含时间项</code></pre>
+  <p style="font-size:13.5px">
+    三条数学性质由单元测试锁定（<code>test_dual_channel.py</code>）：
+    ① <strong>扩展只能提分</strong>——max ≥ 裸查询通道，弱证据永远不会因扩展掉分或掉出地板；
+    ② <strong>无扩展文本时开关无感</strong>——LLM 关闭或扩展为空，打分与旧版逐位一致；
+    ③ <strong><code>QUERY_DUAL_CHANNEL=false</code> 精确回退</strong> V3 单通道行为，一行配置即可 A/B 对照。
+    成本：扩展存在时每查询多一次嵌入与一倍打分（无额外 LLM 调用）。
+  </p>
+
+  <h3>实证：三条件同库对照（15 例多跳链式场景，chain@k = 全部跳证据都在 top-k 内）</h3>
+  <table>
+    <caption>数据源 data/multihop_report.json；三种条件共享同一记忆库，只差查询表达与通道开关</caption>
+    <tr><th>查询条件</th><th class="num">chain@10</th><th class="num">chain@20</th><th class="num">chain@100</th><th class="num">hop1/hop2 召回</th><th class="num">过地板池均值</th></tr>
+    <tr><td>裸查询（无扩展，检索下界）</td><td class="num">80.00%</td><td class="num">80.00%</td><td class="num">86.67%</td><td class="num">1.00 / 1.00</td><td class="num">19.9 条</td></tr>
+    <tr><td><strong>双通道（默认开启）</strong></td><td class="num win">86.67%</td><td class="num win">86.67%</td><td class="num win">93.33%</td><td class="num win">1.00 / 1.00</td><td class="num">31.8 条</td></tr>
+    <tr><td>单通道混合（V3 原行为）</td><td class="num">73.33%</td><td class="num">73.33%</td><td class="num">80.00%</td><td class="num">0.93 / 0.93</td><td class="num">29.2 条</td></tr>
+  </table>
+  <p style="font-size:13px">
+    结论：双通道在所有指标上 ≥ 裸查询（扩展的改述收益被保留），且在所有指标上严格优于 V3 单通道
+    （稀释伤害被免疫）；唯一代价是过地板的证据池更大（19.9 → 31.8 条），在官方 top_k=100 的设定下可接受。
+  </p>
+
+  <h3>测量门的附带裁决：不做子查询扇出、不做实体图层</h3>
+  <p style="font-size:13.5px">
+    同一批数据先回答了"要不要为多跳建图结构"：裸查询下<u>桥接实体召回率 100%</u>（hop1 全部排在 rank 1-6）、
+    链完整率 86.67% 已过 85% 阈值——多跳丢证据的主因是<strong>相关度地板</strong>而非桥接检索能力，
+    昂贵的图结构（Mem0g/Zep 路线）被数据否决。剩余缺口（hop3 弱语义末端跳）的修复路径在写入端增强而非检索端。
+  </p>
+</section>
+
+<!-- ================================================================ -->
+<section id="evidence">
+  <div class="section-head">
+    <p class="kicker">8 · 实证</p>
+    <h2>A/B 实验：同一批数据，只切一个开关</h2>
+    <div class="rule"></div>
+  </div>
+
+  <h3>方法与可复现性</h3>
+  <ul style="color:var(--text-secondary); font-size:13.5px">
+    <li><strong>数据：</strong>15 例人工合成时间歧义场景（<code>tests/fixtures/temporal_ab_cases.jsonl</code>），覆盖 5 类查询 × 中英双语；每例含同主题、不同时间的目标记忆与分心记忆，关键词唯一性由 pydantic 校验强制（答案词不得泄漏进 query）。</li>
+    <li><strong>对照：</strong><code>TEMPORAL_MODE=off</code> vs <code>soft</code>，其余配置完全相同；真实 FastEmbed 向量 + MemoryService 全链路，进程内运行（<code>scripts/run_temporal_ab.py</code>）。</li>
+    <li><strong>抽取层隔离：</strong>本报告为 <code>oracle</code> 模式——时间约束直接取数据集内置期望值，衡量<u>打分层上界</u>；<code>--llm real</code> 可换真实 LLM 抽取并输出抽取一致率。</li>
+    <li><strong>固定测量纪元：</strong>记录内容渲染含时间戳且参与向量化，用墙钟会让每次运行的嵌入漂移、近平局用例逐次翻转（实测同代码波动达 ±7pp）。两个面板均钉死 <code>MEASUREMENT_NOW_MS</code>，同代码连跑数字逐位一致——<u>本节所有数字均为可复现参考值</u>。</li>
+    <li><strong>指标：</strong>Hit@1 / Hit@k(k=5) / MRR@k / 目标压过分心项比例，另按查询类型分组。</li>
+  </ul>
+
+  <div class="card chart-card">
+    <p class="chart-title">总体指标 · off vs soft</p>
+    <p class="chart-sub">top_k=5，15 例；悬停查看数值，完整数据见下方表格</p>
+    <div class="legend" aria-hidden="false">
+      <span class="key"><span class="swatch off"></span>off（基线，无时间项）</span>
+      <span class="key"><span class="swatch soft"></span>soft（时间感知打分）</span>
+    </div>
+    <div class="columns">
+      <div class="col-gridlines" aria-hidden="true">
+        <span class="gl" style="bottom:0%"></span><span class="gl" style="bottom:25%"></span>
+        <span class="gl" style="bottom:50%"></span><span class="gl" style="bottom:75%"></span>
+      </div>
+      <div class="y-axis" aria-hidden="true">
+        <span class="tick" style="--p:0%">0</span><span class="tick" style="--p:25%">0.25</span>
+        <span class="tick" style="--p:50%">0.50</span><span class="tick" style="--p:75%">0.75</span>
+        <span class="tick" style="--p:100%">1.00</span>
+      </div>
+      <div class="col-plot">
+        <div class="col-group">
+          <div class="hit" tabindex="0" data-series="off" data-metric="Hit@1" data-value="0.2000">
+            <div class="bar-col off" style="height:20%"></div>
+          </div>
+          <div class="hit" tabindex="0" data-series="soft" data-metric="Hit@1" data-value="0.8000">
+            <div class="bar-col soft" style="height:80%"><span class="cap">0.80</span></div>
+          </div>
+        </div>
+        <div class="col-group">
+          <div class="hit" tabindex="0" data-series="off" data-metric="Hit@k" data-value="0.7333">
+            <div class="bar-col off" style="height:73.33%"></div>
+          </div>
+          <div class="hit" tabindex="0" data-series="soft" data-metric="Hit@k" data-value="0.9333">
+            <div class="bar-col soft" style="height:93.33%"><span class="cap">0.93</span></div>
+          </div>
+        </div>
+        <div class="col-group">
+          <div class="hit" tabindex="0" data-series="off" data-metric="MRR@k" data-value="0.4667">
+            <div class="bar-col off" style="height:46.67%"></div>
+          </div>
+          <div class="hit" tabindex="0" data-series="soft" data-metric="MRR@k" data-value="0.8667">
+            <div class="bar-col soft" style="height:86.67%"><span class="cap">0.87</span></div>
+          </div>
+        </div>
+        <div class="col-group">
+          <div class="hit" tabindex="0" data-series="off" data-metric="目标压过分心项" data-value="0.4000">
+            <div class="bar-col off" style="height:40%"></div>
+          </div>
+          <div class="hit" tabindex="0" data-series="soft" data-metric="目标压过分心项" data-value="0.9333">
+            <div class="bar-col soft" style="height:93.33%"><span class="cap">0.93</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="col-x">
+        <span class="cat">Hit@1</span><span class="cat">Hit@k</span>
+        <span class="cat">MRR@k</span><span class="cat">目标压过分心项</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card chart-card">
+    <p class="chart-title">MRR@k 按查询类型分解</p>
+    <p class="chart-sub">soft 在全部 5 类上提升；事件类与首末次仍各有残留难点（见诚实边界）</p>
+    <div class="legend" aria-hidden="false">
+      <span class="key"><span class="swatch off"></span>off（基线）</span>
+      <span class="key"><span class="swatch soft"></span>soft（时间感知）</span>
+    </div>
+    <div class="hbars">
+      <div class="hb-gridlines" aria-hidden="true">
+        <span class="gl base" style="left:0%"></span>
+        <span class="gl" style="left:25%"></span><span class="gl" style="left:50%"></span>
+        <span class="gl" style="left:75%"></span><span class="gl" style="left:100%"></span>
+      </div>
+      <div class="hb-plot">
+        <div class="hb-row">
+          <span class="hb-cat">滚动窗口</span>
+          <div class="hb-pair">
+            <div class="hit" tabindex="0" data-series="off" data-metric="滚动窗口" data-value="0.6000">
+              <div class="bar-h off" style="width:60%"></div>
+            </div>
+            <div class="hit" tabindex="0" data-series="soft" data-metric="滚动窗口" data-value="1.0000">
+              <div class="bar-h soft" style="width:100%"><span class="tip">1.00</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="hb-row">
+          <span class="hb-cat">事件之前<br><span style="font-size:10.5px">event_before</span></span>
+          <div class="hb-pair">
+            <div class="hit" tabindex="0" data-series="off" data-metric="事件之前" data-value="0.3333">
+              <div class="bar-h off" style="width:33.33%"></div>
+            </div>
+            <div class="hit" tabindex="0" data-series="soft" data-metric="事件之前" data-value="0.8333">
+              <div class="bar-h soft" style="width:83.33%"><span class="tip">0.83</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="hb-row">
+          <span class="hb-cat">事件之后<br><span style="font-size:10.5px">event_after</span></span>
+          <div class="hb-pair">
+            <div class="hit" tabindex="0" data-series="off" data-metric="事件之后" data-value="0.2500">
+              <div class="bar-h off" style="width:25%"></div>
+            </div>
+            <div class="hit" tabindex="0" data-series="soft" data-metric="事件之后" data-value="0.7500">
+              <div class="bar-h soft" style="width:75%"><span class="tip">0.75</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="hb-row">
+          <span class="hb-cat">最早排序</span>
+          <div class="hb-pair">
+            <div class="hit" tabindex="0" data-series="off" data-metric="最早排序" data-value="0.2500">
+              <div class="bar-h off" style="width:25%"></div>
+            </div>
+            <div class="hit" tabindex="0" data-series="soft" data-metric="最早排序" data-value="0.5000">
+              <div class="bar-h soft" style="width:50%"><span class="tip">0.50</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="hb-row">
+          <span class="hb-cat">最晚排序</span>
+          <div class="hb-pair">
+            <div class="hit" tabindex="0" data-series="off" data-metric="最晚排序" data-value="0.6667">
+              <div class="bar-h off" style="width:66.67%"></div>
+            </div>
+            <div class="hit" tabindex="0" data-series="soft" data-metric="最晚排序" data-value="1.0000">
+              <div class="bar-h soft" style="width:100%"><span class="tip">1.00</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="hb-x" aria-hidden="true">
+        <span class="tick" style="left:0%">0</span><span class="tick" style="left:25%">0.25</span>
+        <span class="tick" style="left:50%">0.50</span><span class="tick" style="left:75%">0.75</span>
+        <span class="tick" style="left:100%">1.00</span>
+      </div>
+    </div>
+  </div>
+
+  <h3>完整数据（表格视图）</h3>
+  <div class="card" style="padding:14px 18px">
+    <table>
+      <caption>总体指标 · 15 例（数据源 data/temporal_ab_report.json，llm_mode=oracle，固定测量纪元）</caption>
+      <tr><th>模式</th><th class="num">Hit@1</th><th class="num">Hit@k</th><th class="num">MRR@k</th><th class="num">目标压过分心项</th><th class="num">错误数</th></tr>
+      <tr><td>off（基线）</td><td class="num">0.2000</td><td class="num">0.7333</td><td class="num">0.4667</td><td class="num">0.4000</td><td class="num">0</td></tr>
+      <tr><td>soft（时间感知）</td><td class="num win">0.8000</td><td class="num win">0.9333</td><td class="num win">0.8667</td><td class="num win">0.9333</td><td class="num">0</td></tr>
+    </table>
+    <table>
+      <caption>按查询类型分解（每格为该类型均值；例数：rolling 5 / event_before 3 / event_after 2 / earliest 2 / latest 3）</caption>
+      <tr><th>查询类型</th><th colspan="2" class="num">Hit@1</th><th colspan="2" class="num">Hit@k</th><th colspan="2" class="num">MRR@k</th><th colspan="2" class="num">压过分心项</th></tr>
+      <tr><td></td><th class="num">off</th><th class="num">soft</th><th class="num">off</th><th class="num">soft</th><th class="num">off</th><th class="num">soft</th><th class="num">off</th><th class="num">soft</th></tr>
+      <tr><td>滚动窗口</td><td class="num">0.40</td><td class="num win">1.00</td><td class="num">0.80</td><td class="num win">1.00</td><td class="num">0.60</td><td class="num win">1.00</td><td class="num">0.40</td><td class="num win">1.00</td></tr>
+      <tr><td>事件之前</td><td class="num">0.00</td><td class="num win">0.67</td><td class="num">0.67</td><td class="num win">1.00</td><td class="num">0.33</td><td class="num win">0.83</td><td class="num">0.67</td><td class="num win">1.00</td></tr>
+      <tr><td>事件之后</td><td class="num">0.00</td><td class="num win">0.50</td><td class="num">0.50</td><td class="num win">1.00</td><td class="num">0.25</td><td class="num win">0.75</td><td class="num">0.00</td><td class="num win">1.00</td></tr>
+      <tr><td>最早排序</td><td class="num">0.00</td><td class="num win">0.50</td><td class="num">0.50</td><td class="num">0.50</td><td class="num">0.25</td><td class="num win">0.50</td><td class="num">0.50</td><td class="num">0.50</td></tr>
+      <tr><td>最晚排序</td><td class="num">0.33</td><td class="num win">1.00</td><td class="num">1.00</td><td class="num">1.00</td><td class="num">0.67</td><td class="num win">1.00</td><td class="num">0.33</td><td class="num win">1.00</td></tr>
+    </table>
+  </div>
+
+  <div class="callout">
+    <p><strong>必须诚实标注的边界：</strong></p>
+    <p>
+      ① 本报告 <code>llm_mode=oracle</code>——抽取层由数据集内置期望值代替，衡量的是
+      <u>打分层上界</u>；真实 LLM 抽取质量需 <code>--llm real</code> 单独验证（工具已内置抽取一致率报告）。<br>
+      ② 事件类两例（learning-en / sport-zh）目标排第 2：锚点记录与查询共享事件短语、语义自指得分更高——已知问题，
+      修复方向是锚点记录降权，但存在"锚点记录即答案"的反例需单独设计。<br>
+      ③ <code>order-first-lang-en</code> 一例的目标记忆在 off/soft 两种模式下都未过相关度地板——证据在地板之下，
+      属写入端增强（enrichment）职责，检索端无解。<br>
+      ④ 15 例规模小、为人工合成，指标不能外推为正式评测结论；合成数据也不能替代官方评测。
+    </p>
+  </div>
+</section>
+
+<!-- ================================================================ -->
+<section id="engineering">
+  <div class="section-head">
+    <p class="kicker">9 · 工程底座</p>
+    <h2>与算法同等重要的四条契约</h2>
+    <div class="rule"></div>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <h3 style="margin-top:0">幂等与冲突检测</h3>
+      <p style="font-size:13.5px"><code>request_id</code> 主键 + <code>payload_hash</code>（规范化 JSON 的 SHA-256）：同 ID 不同内容 → 409 冲突；同 ID 已完成 → 幂等成功；处理中超时（默认 300s）→ 允许安全重试。失败请求显式 <code>mark_failed</code>，不留下永久卡死状态。</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">user_id 严格隔离</h3>
+      <p style="font-size:13.5px">检索只加载当前 <code>user_id</code> 的记录（带索引的 SQL 过滤 + 内存余弦），简化接口落入独立本地空间。跨用户检索在数据路径上不存在，不靠过滤兜底。</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">写入可见性契约</h3>
+      <p style="font-size:13.5px">Add 在向量与时间戳<u>事务提交后</u>才返回 200——"可检索"是持久化之后的属性，不是 aspirational 的。WAL + <code>synchronous=FULL</code> + <code>BEGIN IMMEDIATE</code> 单写者串行化。</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">数据保留与攻击面</h3>
+      <p style="font-size:13.5px">启动时按写入时间清理 30 天前批次（"评测数据 30 天内删除"的保守实现）；Swagger/OpenAPI 默认关闭，公网部署强制 <code>MEMORY_API_KEY</code>（Bearer/Token/X-Api-Key 三种传法，常数时间比较），<code>/health</code> 按契约免鉴权。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ -->
+<section id="testing">
+  <div class="section-head">
+    <p class="kicker">10 · 质量保障</p>
+    <h2>97 个用例，全部离线确定性运行</h2>
+    <div class="rule"></div>
+  </div>
+  <p>
+    测试不下载模型、不调用外部 API：向量器用确定性 Bag-of-Words 替身，LLM 用桩对象，
+    时间数学直接对固定时间轴断言（2024-01-15 / 2026-08-01 等字面毫秒值）。
+  </p>
+  <table>
+    <tr><th>覆盖面</th><th>要点</th><th>位置</th></tr>
+    <tr><td>双协议契约</td><td>简化 /set /get 与官网 Add/Search 格式、响应回显、错误码</td><td><code>test_api.py</code></td></tr>
+    <tr><td>时间窗口数学</td><td>日历月/年、滚动天/周、月末收敛（2 月 28 日）、半衰期数值（≈0.5）、硬边界 0 分、三级锚点</td><td><code>test_temporal.py</code></td></tr>
+    <tr><td>服务级行为</td><td>软打分排序、严格模式截断、事件锚定窗口（白盒断言硬边界）、锚点不可解时退回、幻觉约束丢弃、首末次排序</td><td><code>test_temporal.py</code></td></tr>
+    <tr><td>双通道不变量</td><td>扩展<u>不稀释</u>裸查询分数（双通道分==无扩展分、单通道严格更低）、无扩展时开关无感、LLM 关闭时逐位一致</td><td><code>test_dual_channel.py</code></td></tr>
+    <tr><td>回归底线</td><td><code>off</code> 模式同内容记录分数<u>完全相等</u>（逐位一致断言），排序退回 created_at 升序</td><td><code>test_temporal.py</code></td></tr>
+    <tr><td>提示词数据流</td><td>实际 system prompt、payload 对齐、双通道嵌入序列、增强开关、strict/fallback 两档失败处理</td><td><code>test_prompt_v2.py</code></td></tr>
+    <tr><td>评测工具链</td><td>时间/多跳用例校验规则（关键词唯一性、结构一致性、oracle 可解析）、fillers 确定性、rank 计算、离线 A/B 与多跳管道</td><td><code>test_temporal_benchmark.py</code> / <code>test_multihop_benchmark.py</code></td></tr>
+  </table>
+  <div class="callout green">
+    <p><strong>测试哲学与方案同构：</strong>fixtures README 明确列出"不能从回归测试推导的结论"
+    ——模拟响应正确不代表真实 LLM 正确、模拟向量排序正确不代表真实检索提升。
+    <u>离线测试验证确定性代码，真实能力用 A/B 工具单独测</u>，两类证据不互相冒充。</p>
+  </div>
+</section>
+
+<!-- ================================================================ -->
+<section id="limits">
+  <div class="section-head">
+    <p class="kicker">11 · 边界与披露</p>
+    <h2>这套方案不承诺什么</h2>
+    <div class="rule"></div>
+  </div>
+  <ul style="color:var(--text-secondary); font-size:13.5px">
+    <li><strong>oracle ≠ 端到端：</strong>A/B 报告衡量打分层上界；真实抽取一致率需 <code>--llm real</code> 实测，抽取层与打分层质量分别归因。端到端增益 ≈ 抽取一致率 × 打分增益。</li>
+    <li><strong>证据在地板下检索端无解：</strong>弱语义证据（如"最早排序"一例、多跳 hop3）不过 <code>MIN_RELEVANCE_SCORE</code> 时，检索端任何排序逻辑都救不回——这是写入端增强（enrichment）的职责边界。</li>
+    <li><strong>测量自身的局限：</strong>两个面板的数据集为人工合成（多跳干扰记忆由模板生成），模拟的是机制压力而非评测分布；数字用于设计决策与回归，不外推为正式评测成绩。</li>
+    <li><strong>不含任何评测金标：</strong>系统无数据集硬编码；调参只能用公开材料；禁止用 benchmark 泄漏样本、人工实时答题或提示注入调整系统。</li>
+    <li><strong>合规模式区分：</strong>官网 Full 清单当前要求 <code>gpt-4o-mini</code>；DeepSeek 仅用于本地实验与方法验证，其运行结果不冒充合规勾选。不能发送评测数据到第三方时保持 <code>LLM_PROVIDER=none</code>。</li>
+    <li><strong>向量模型维度变更：</strong>换 <code>EMBEDDING_MODEL</code> 后旧向量维度不一致，须换新库或离线重建，不能混用分数（检索端对维度不匹配记录跳过而非返回错分）。</li>
+    <li><strong>规模边界：</strong>SQLite + 内存余弦适合按 user 隔离的单样本规模；更大规模需独立向量库。</li>
+  </ul>
+</section>
+
+<footer>
+  Agent Memory API · 时间感知检索方案说明（V3.1 双通道）—— 依据 main @ 59a73ad（备份标签 v3-baseline）编写；
+  A/B 与多跳数字来自 data/temporal_ab_report.json、data/multihop_report.json（固定测量纪元，同代码可复现）；
+  走查数值由 scripts/trace_walkthrough.py 真实运行产出。测试计数 97 passed 为 2026-09-28 本机实测。
+  图表数据与正文引用的每处行为均可在对应源文件复核。
+</footer>
+</main>
+
+<script>
+/* 悬浮提示：数值同时可得于直接标注与表格视图，提示层只是增强 */
+(function () {
+  const tip = document.getElementById('tooltip');
+  const NAMES = { off: 'off（基线）', soft: 'soft（时间感知）' };
+
+  function build(hit) {
+    tip.textContent = '';
+    const row = document.createElement('div'); row.className = 'row';
+    const val = document.createElement('span'); val.className = 'val';
+    val.textContent = hit.dataset.value;
+    const key = document.createElement('span'); key.className = 'key';
+    key.style.background = getComputedStyle(
+      hit.querySelector('.bar-col, .bar-h')).backgroundColor;
+    const label = document.createElement('span');
+    label.textContent = NAMES[hit.dataset.series] + ' · ' + hit.dataset.metric;
+    row.append(key, val, label); tip.append(row);
+  }
+  function place(x, y) {
+    tip.style.opacity = '1'; tip.setAttribute('aria-hidden', 'false');
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    let left = x + 14, top = y + 16;
+    if (left + w > window.innerWidth - 8) left = x - w - 14;
+    if (top + h > window.innerHeight - 8) top = y - h - 12;
+    tip.style.left = left + 'px'; tip.style.top = top + 'px';
+  }
+  function hide() { tip.style.opacity = '0'; tip.setAttribute('aria-hidden', 'true'); }
+
+  document.querySelectorAll('.hit').forEach(function (hit) {
+    hit.addEventListener('pointerenter', function (e) { build(hit); place(e.clientX, e.clientY); });
+    hit.addEventListener('pointermove', function (e) { place(e.clientX, e.clientY); });
+    hit.addEventListener('pointerleave', hide);
+    hit.addEventListener('focus', function () {
+      build(hit);
+      const r = hit.getBoundingClientRect();
+      place(r.left + r.width / 2, r.top);
+    });
+    hit.addEventListener('blur', hide);
+  });
+
+  /* 主题切换：data-theme 同时压制系统的浅/深偏好 */
+  const buttons = { auto: null, light: null, dark: null };
+  ['auto', 'light', 'dark'].forEach(function (name) {
+    const btn = document.getElementById('theme-' + name);
+    buttons[name] = btn;
+    btn.addEventListener('click', function () {
+      document.documentElement.removeAttribute('data-theme');
+      if (name !== 'auto') document.documentElement.setAttribute('data-theme', name);
+      Object.keys(buttons).forEach(function (k) {
+        buttons[k].setAttribute('aria-pressed', String(k === name));
+      });
+    });
+  });
+})();
+</script>
+</body>
+</html>
