@@ -2,7 +2,11 @@
 # 用法：docker compose up -d --build
 services:
   agent-memory:
-    build: .
+    build:
+      context: .
+      args:
+        # 国内轻量服务器构建提速；海外部署删掉此行即可回落官方源。
+        PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
     container_name: agent-memory
     restart: always
     ports:

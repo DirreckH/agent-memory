@@ -7,8 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY requirements.txt ./
-RUN python -m pip install --upgrade pip && \
-    python -m pip install -r requirements.txt
+# 国内服务器构建慢可换清华源：docker compose build --build-arg PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG PIP_INDEX_URL=https://pypi.org/simple
+RUN python -m pip install --upgrade pip -i ${PIP_INDEX_URL} && \
+    python -m pip install -r requirements.txt -i ${PIP_INDEX_URL}
 
 COPY app ./app
 # scripts/ 一并打入镜像，容器内可直接运行线上自检：
