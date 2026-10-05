@@ -176,6 +176,9 @@ class OracleExpansionLLM:
             text=self._expansions.get(query, ""), temporal=None
         )
 
+    def extract_temporal(self, query: str) -> None:
+        return None
+
 
 # ---------------------------- 评测管道
 

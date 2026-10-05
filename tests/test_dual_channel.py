@@ -58,6 +58,9 @@ class StubMemoryLLM:
     def expand_query(self, query: str, options: list[str] | None) -> QueryExpansion:
         return self.expansion
 
+    def extract_temporal(self, query: str) -> None:
+        return None
+
 
 def _build_services(tmp_path: Path, expansion: QueryExpansion):
     """四个服务共享同一记忆库，只差查询表达与通道开关。"""

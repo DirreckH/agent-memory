@@ -39,7 +39,7 @@ class StoredMemory:
     search_text: str
     embedding: NDArray[np.float32]
     created_at: str
-    # 消息自带的事件时间（毫秒时间戳）；缺失时为 None，检索端回退解析 created_at。
+    # 源消息时间（毫秒时间戳），不等同于事件发生时间；缺失时保持 None。
     source_timestamp: int | None = None
 
 

@@ -20,6 +20,7 @@ from app.storage import MemoryToStore, SQLiteMemoryStore, StoredMemory
 from app.temporal import (
     EventAnchorSpec,
     TemporalConstraints,
+    TemporalReference,
     TemporalWindow,
     effective_time_ms,
     query_mentions_temporal,
@@ -27,6 +28,7 @@ from app.temporal import (
     resolve_relative_window,
     time_match,
 )
+from app.temporal_extraction import extract_temporal_rules
 
 
 logger = logging.getLogger(__name__)
@@ -50,6 +52,7 @@ class _TemporalContext:
 
     window: TemporalWindow | None
     ordering: str | None
+    reference: TemporalReference
 
 
 def utc_now_text() -> str:
@@ -140,7 +143,7 @@ class MemoryService:
     def _llm_query_expansion(
         self, query: str, options: list[str] | None
     ) -> QueryExpansion:
-        if not self.llm.enabled:
+        if not self.llm.enabled or not self.settings.llm_search_expansion:
             return QueryExpansion(text="", temporal=None)
         try:
             return self.llm.expand_query(query, options)
@@ -149,6 +152,26 @@ class MemoryService:
                 raise
             logger.warning("LLM 查询扩展失败，已回退到原始查询")
             return QueryExpansion(text="", temporal=None)
+
+    def _query_temporal(self, query: str) -> TemporalConstraints | None:
+        """独立于扩展文本的时间入口；LLM 关闭时仍运行受控规则。"""
+        mode = self.settings.temporal_extraction_mode
+        if self.settings.temporal_mode == "off" or mode == "off":
+            return None
+        rules = extract_temporal_rules(query)
+        if rules.blocked:
+            return None
+        if rules.complete:
+            return rules.constraints
+        if mode == "rules" or not self.llm.enabled or not query_mentions_temporal(query):
+            return None
+        try:
+            return self.llm.extract_temporal(query)
+        except LLMError:
+            if self.settings.llm_failure_mode == "strict":
+                raise
+            logger.warning("LLM 时间抽取失败，已放弃无法可靠解析的时间约束")
+            return None
 
     @staticmethod
     def _payload_hash(
@@ -269,25 +292,38 @@ class MemoryService:
 
     @staticmethod
     def _record_time_ms(record: StoredMemory) -> int | None:
-        return effective_time_ms(record.source_timestamp, record.created_at)
+        return effective_time_ms(record.source_timestamp)
 
     def _resolve_temporal_context(
         self,
         query: str,
         constraints: TemporalConstraints | None,
         records: list[StoredMemory],
+        *,
+        request_time_ms: int | None = None,
+        query_time_ms: int | None = None,
     ) -> _TemporalContext | None:
-        """把 LLM 抽取的时间约束解析为有效检索上下文；不可靠时返回 None。"""
+        """把已经核验的时间约束解析为检索上下文；无法确定边界时回退。"""
         if self.settings.temporal_mode == "off" or constraints is None:
             return None
-        # 程序化防御：LLM 声称的时间约束必须能在查询原文中回查到时间信号，
-        # 否则视为幻觉约束直接丢弃。
-        if not query_mentions_temporal(query):
-            return None
+        # 独立抽取入口已完成规则/原文校验；这里不再用粗粒度守卫覆盖其结果。
 
-        effective_times = [self._record_time_ms(record) for record in records]
-        anchor_ms = resolve_anchor(
-            effective_times, now_ms=int(time.time() * 1000)
+        source_times = [self._record_time_ms(record) for record in records]
+        reference = resolve_anchor(
+            source_times,
+            now_ms=(
+                request_time_ms
+                if request_time_ms is not None
+                else int(time.time() * 1000)
+            ),
+            mode=self.settings.temporal_reference_mode,
+            query_time_ms=query_time_ms,
+        )
+        logger.debug(
+            "Temporal reference: mode=%s source=%s timestamp_ms=%s",
+            self.settings.temporal_reference_mode,
+            reference.source,
+            reference.timestamp_ms,
         )
 
         window: TemporalWindow | None = None
@@ -295,19 +331,33 @@ class MemoryService:
             window = self._resolve_event_anchor_window(
                 constraints.event_anchor, records
             )
-        if window is None and constraints.relative_window is not None:
-            window = resolve_relative_window(
-                constraints.relative_window, anchor_ms
-            )
+        if (
+            window is None
+            and constraints.relative_window is not None
+            and reference.timestamp_ms is not None
+        ):
+            try:
+                window = resolve_relative_window(
+                    constraints.relative_window, reference.timestamp_ms
+                )
+            except (OverflowError, OSError, ValueError):
+                # 合法时间戳平移后仍可能超出日历范围；放弃窗口而不使检索失败。
+                logger.debug("Temporal window exceeds supported calendar range")
 
-        if window is None and constraints.ordering is None:
+        # 全部时间未知时沿用普通排序，避免把入库先后解释为事件先后。
+        ordering = (
+            constraints.ordering
+            if any(t is not None for t in source_times)
+            else None
+        )
+        if window is None and ordering is None:
             return None
-        return _TemporalContext(window=window, ordering=constraints.ordering)
+        return _TemporalContext(window=window, ordering=ordering, reference=reference)
 
     def _resolve_event_anchor_window(
         self, anchor: EventAnchorSpec, records: list[StoredMemory]
     ) -> TemporalWindow | None:
-        """两阶段检索的锚点定位：用事件短语找最佳命中记录，以其事件时间为窗口边界。"""
+        """用事件短语找最佳记录，以源消息时间代理事件边界；尚未抽取事件发生时间。"""
         try:
             event_vector = self.embedder.embed([anchor.event])[0]
         except EmbeddingError:
@@ -333,7 +383,8 @@ class MemoryService:
                 start_ms=None, end_ms=best_time, hard_boundary=True
             )
         return TemporalWindow(
-            start_ms=best_time, end_ms=None, hard_boundary=True
+            start_ms=best_time, end_ms=None, hard_boundary=True,
+            start_inclusive=False,
         )
 
     def _score_record(
@@ -357,21 +408,22 @@ class MemoryService:
             score += weights[2] * time_match
         return score
 
-    @staticmethod
-    def _apply_strict_temporal_filter(
+    @classmethod
+    def _rank_strict_temporal_candidates(
+        cls,
         scored: list[tuple[float, StoredMemory, int | None]],
-        window: TemporalWindow | None,
-        limit: int,
+        window: TemporalWindow,
+        ordering: str | None,
     ) -> list[tuple[float, StoredMemory, int | None]]:
-        """严格模式：窗口内候选足够时才截掉窗口外记录；时间未知的记录始终保留。"""
-        if window is None:
-            return scored
-        in_window = [
-            item for item in scored if item[2] is None or window.contains(item[2])
-        ]
-        if len(in_window) >= limit:
-            return in_window
-        return scored
+        """确认窗内、时间未知、窗外补充分组排序；分组与 top_k 无关。"""
+        groups: list[list[tuple[float, StoredMemory, int | None]]] = [[], [], []]
+        for item in scored:
+            timestamp = item[2]
+            tier = 1 if timestamp is None else (0 if window.contains(timestamp) else 2)
+            groups[tier].append(item)
+        for group in groups:
+            cls._sort_scored(group, ordering)
+        return [item for group in groups for item in group]
 
     @staticmethod
     def _sort_scored(
@@ -398,11 +450,17 @@ class MemoryService:
         user_id: str,
         top_k: int,
         options: list[str] | None = None,
+        *,
+        query_time_ms: int | None = None,
     ) -> list[SearchHit]:
+        """检索记忆；query_time_ms 仅覆盖相对窗口的参考时间，不改变记录时间。"""
+        # 必须在 LLM 和向量调用之前捕获，避免调用跨日/月改变本次查询的参照。
+        request_time_ms = int(time.time() * 1000)
         if len(query) > self.settings.max_query_chars:
             raise ValueError("query 超过 MAX_QUERY_CHARS 限制")
 
         try:
+            temporal = self._query_temporal(query)
             expansion = self._llm_query_expansion(query, options)
             base_parts = [query]
             if options:
@@ -423,7 +481,13 @@ class MemoryService:
             raise MemoryServiceUnavailable(str(exc)) from exc
 
         records = self.store.fetch_by_user(user_id)
-        context = self._resolve_temporal_context(query, expansion.temporal, records)
+        context = self._resolve_temporal_context(
+            query,
+            temporal,
+            records,
+            request_time_ms=request_time_ms,
+            query_time_ms=query_time_ms,
+        )
 
         window = context.window if context is not None else None
         if window is not None:
@@ -459,9 +523,11 @@ class MemoryService:
                 scored.append((best, record, record_time))
 
         limit = min(top_k, self.settings.max_top_k, self.settings.candidate_pool_size)
-        if self.settings.temporal_mode == "strict":
-            scored = self._apply_strict_temporal_filter(scored, window, limit)
-        self._sort_scored(scored, context.ordering if context else None)
+        ordering = context.ordering if context else None
+        if self.settings.temporal_mode == "strict" and window is not None:
+            scored = self._rank_strict_temporal_candidates(scored, window, ordering)
+        else:
+            self._sort_scored(scored, ordering)
         return [
             SearchHit(
                 id=record.id,

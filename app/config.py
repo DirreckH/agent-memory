@@ -58,9 +58,14 @@ class Settings(BaseSettings):
     max_top_k: int = Field(default=100, ge=1, le=1000)
     candidate_pool_size: int = Field(default=400, ge=1, le=10000)
 
-    # 时间感知检索：LLM 只抽取相对时间约束，绝对窗口由确定性代码解析。
-    # off/soft/strict：soft 加权参与打分；strict 在窗口内候选足够时截掉窗口外记录。
+    # 时间感知检索：规则/LLM 抽取相对约束，绝对窗口由确定性代码解析。
+    # strict：确认窗内、时间未知、窗外补充依次返回，组内排序后截断。
     temporal_mode: Literal["off", "soft", "strict"] = "soft"
+    # replay：以当前用户的最大源消息时间回放；realtime：以检索开始时刻为准。
+    # 显式 query_time_ms 优先于模式；replay 缺少源消息时间时不猜测相对窗口。
+    temporal_reference_mode: Literal["replay", "realtime"] = "replay"
+    # 独立于查询扩展：off=不抽取；rules=仅规则；hybrid=规则优先，复杂表达用 LLM。
+    temporal_extraction_mode: Literal["off", "rules", "hybrid"] = "hybrid"
     temporal_weight: float = Field(default=0.20, ge=0.0, le=1.0)
     temporal_decay_half_life_days: float = Field(
         default=30.0, gt=0.0, le=3650.0

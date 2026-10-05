@@ -146,11 +146,21 @@ def test_resolve_rolling_month_uses_calendar_math() -> None:
 
 
 def test_resolve_anchor_prefers_conversation_frontier() -> None:
-    assert resolve_anchor([10, None, 999, 100], now_ms=50_000) == 999
+    reference = resolve_anchor([10, None, 999, 100], now_ms=50_000)
+    assert reference.timestamp_ms == 999
+    assert reference.source == "conversation_frontier"
 
 
-def test_resolve_anchor_falls_back_to_server_clock() -> None:
-    assert resolve_anchor([None, None], now_ms=50_000) == 50_000
+def test_replay_anchor_without_source_time_is_unavailable() -> None:
+    reference = resolve_anchor([None, None], now_ms=50_000)
+    assert reference.timestamp_ms is None
+    assert reference.source == "unavailable"
+
+
+def test_realtime_anchor_uses_clock_even_with_source_times() -> None:
+    reference = resolve_anchor([10, 999], now_ms=50_000, mode="realtime")
+    assert reference.timestamp_ms == 50_000
+    assert reference.source == "request_time"
 
 
 def test_time_match_unknown_time_is_neutral() -> None:
@@ -198,9 +208,17 @@ def test_effective_time_prefers_source_timestamp() -> None:
     assert effective_time_ms(1234, "2026-01-01T00:00:00.000Z") == 1234
 
 
-def test_effective_time_parses_created_at_fallback() -> None:
-    value = effective_time_ms(None, "2026-01-01T00:00:00.000Z")
-    assert value == _ms(datetime(2026, 1, 1, tzinfo=timezone.utc))
+def test_effective_time_does_not_use_created_at_fallback() -> None:
+    assert effective_time_ms(None, "2026-01-01T00:00:00.000Z") is None
+
+
+@pytest.mark.parametrize("timestamp", [True, -1, 1.5, 10**18])
+def test_invalid_source_time_remains_unknown(timestamp: object) -> None:
+    assert effective_time_ms(timestamp, "2026-01-01T00:00:00.000Z") is None
+
+
+def test_epoch_zero_source_time_is_preserved() -> None:
+    assert effective_time_ms(0) == 0
 
 
 def test_effective_time_invalid_created_at_returns_none() -> None:
@@ -277,6 +295,9 @@ class StubMemoryLLM:
 
     def expand_query(self, query: str, options: list[str] | None) -> QueryExpansion:
         return self.expansion
+
+    def extract_temporal(self, query: str) -> TemporalConstraints | None:
+        return self.expansion.temporal
 
 
 def _window_expansion(unit: str = "month", amount: int = 6) -> QueryExpansion:
@@ -486,7 +507,8 @@ def test_ordering_latest_prefers_newest_match(tmp_path: Path) -> None:
         _make_settings(tmp_path), StubMemoryLLM(latest_expansion), embedder
     )
     plain = _make_service(
-        _make_settings(tmp_path), StubMemoryLLM(plain_expansion), embedder
+        _make_settings(tmp_path, temporal_extraction_mode="off"),
+        StubMemoryLLM(plain_expansion), embedder
     )
     _remember(latest, "I mentioned Aurora in standup", EARLY)
     _remember(latest, "I mentioned Aurora in standup", RECENT)

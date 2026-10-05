@@ -1,0 +1,13 @@
+# 评测部署：崩溃自动拉起，data/ 卷持久化数据库与输入日志。
+# 用法：docker compose up -d --build
+services:
+  agent-memory:
+    build: .
+    container_name: agent-memory
+    restart: always
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data

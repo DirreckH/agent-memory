@@ -7,8 +7,8 @@
 抽取层两种模式：
 - oracle（默认）：时间约束直接取自数据集内置的期望值，衡量“约束抽取
   正确的前提下，时间打分带来的检索增益”，即打分层上界；
-- real：使用 .env 配置的真实 LLM 按 V3 提示词抽取，同时报告抽取结果
-  与期望约束的一致率（抽取层质量）。
+- real：使用生产规则和 .env 配置的真实 LLM 抽取，记录实际采用的约束。
+  现有一致率仅比较类型签名，不代表字段级正确率。
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import tempfile
 from pathlib import Path
 
 from app.config import Settings
-from app.embeddings import FastEmbedder
+from app.embeddings import Embedder, FastEmbedder
 from app.llm import MemoryLLM, QueryExpansion, build_memory_llm
 from app.schemas import MemoryMessage
 from app.service import MemoryService, MemoryServiceUnavailable
@@ -61,25 +61,30 @@ class OracleMemoryLLM:
     def expand_query(self, query: str, options: list[str] | None) -> QueryExpansion:
         return self._expansions.get(query, QueryExpansion(text="", temporal=None))
 
+    def extract_temporal(self, query: str) -> TemporalConstraints | None:
+        return self._expansions.get(query, QueryExpansion(text="", temporal=None)).temporal
 
-class RecordingMemoryLLM:
-    """透传 LLM 调用并记录查询扩展结果，用于抽取层诊断。"""
 
-    def __init__(self, inner: MemoryLLM) -> None:
-        self._inner = inner
-        self.expansions: dict[str, QueryExpansion] = {}
+class BenchmarkMemoryService(MemoryService):
+    """记录实际采用的时间约束；oracle 模式固定约束以隔离抽取层变化。"""
 
-    @property
-    def enabled(self) -> bool:
-        return self._inner.enabled
+    def __init__(
+        self, settings: Settings, store: SQLiteMemoryStore,
+        embedder: Embedder, llm: MemoryLLM,
+    ) -> None:
+        super().__init__(settings, store, embedder, llm)
+        self.extractions: dict[str, QueryExpansion] = {}
 
-    def enrich_messages(self, messages: list[dict[str, object]]) -> dict[int, str]:
-        return self._inner.enrich_messages(messages)
-
-    def expand_query(self, query: str, options: list[str] | None) -> QueryExpansion:
-        expansion = self._inner.expand_query(query, options)
-        self.expansions[query] = expansion
-        return expansion
+    def _query_temporal(self, query: str) -> TemporalConstraints | None:
+        if isinstance(self.llm, OracleMemoryLLM):
+            temporal = (
+                self.llm.extract_temporal(query)
+                if self.settings.temporal_mode != "off" else None
+            )
+        else:
+            temporal = super()._query_temporal(query)
+        self.extractions[query] = QueryExpansion("", temporal)
+        return temporal
 
 
 def build_oracle_expansions(
@@ -280,7 +285,7 @@ def main() -> int:
         if not inner.enabled:
             print("real 模式需要 .env 配置可用的 LLM_PROVIDER 与密钥")
             return 1
-        llm: MemoryLLM = RecordingMemoryLLM(inner)
+        llm: MemoryLLM = inner
     else:
         llm = OracleMemoryLLM(build_oracle_expansions(cases))
 
@@ -294,7 +299,7 @@ def main() -> int:
             )
             / "ab.db",
         )
-        services[mode] = MemoryService(
+        services[mode] = BenchmarkMemoryService(
             mode_settings,
             SQLiteMemoryStore(mode_settings.database_path),
             embedder,
@@ -304,8 +309,10 @@ def main() -> int:
 
     now_ms = MEASUREMENT_NOW_MS
     report = run_ab(services, cases, now_ms=now_ms, top_k=args.top_k)
-    if isinstance(llm, RecordingMemoryLLM):
-        report["extraction"] = extraction_report(cases, llm.expansions)
+    if args.llm == "real":
+        soft_service = services["soft"]
+        assert isinstance(soft_service, BenchmarkMemoryService)
+        report["extraction"] = extraction_report(cases, soft_service.extractions)
     else:
         report["extraction"] = {
             "mode": "oracle",

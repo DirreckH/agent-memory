@@ -6,8 +6,13 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from app.config import Settings
-from app.prompts import ADD_ENRICHMENT_PROMPT_V2, QUERY_EXPANSION_PROMPT_V3
-from app.temporal import TemporalConstraints, parse_temporal
+from app.prompts import (
+    ADD_ENRICHMENT_PROMPT_V2,
+    QUERY_EXPANSION_PROMPT_V3,
+    TEMPORAL_EXTRACTION_PROMPT,
+)
+from app.temporal import TemporalConstraints
+from app.temporal_extraction import parse_grounded_temporal
 
 
 class LLMError(RuntimeError):
@@ -16,7 +21,7 @@ class LLMError(RuntimeError):
 
 @dataclass(frozen=True)
 class QueryExpansion:
-    """查询扩展结果：检索辅助文本 + 受控解析后的时间约束。"""
+    """检索辅助文本；temporal 保留兼容评测数据，生产时间抽取走独立入口。"""
 
     text: str
     temporal: TemporalConstraints | None
@@ -29,7 +34,10 @@ class MemoryLLM(Protocol):
         """为原始消息生成仅用于索引的检索增强文本。"""
 
     def expand_query(self, query: str, options: list[str] | None) -> QueryExpansion:
-        """扩展查询表达并抽取时间约束，但不能生成问题最终答案。"""
+        """扩展查询表达，但不能生成问题最终答案。"""
+
+    def extract_temporal(self, query: str) -> TemporalConstraints | None:
+        """仅从原查询抽取并校验带原文证据的时间约束。"""
 
 
 class NoOpMemoryLLM:
@@ -40,6 +48,9 @@ class NoOpMemoryLLM:
 
     def expand_query(self, query: str, options: list[str] | None) -> QueryExpansion:
         return QueryExpansion(text="", temporal=None)
+
+    def extract_temporal(self, query: str) -> TemporalConstraints | None:
+        return None
 
 
 @dataclass(frozen=True)
@@ -153,9 +164,13 @@ class OpenAICompatibleMemoryLLM:
         expanded = parsed.get("expanded_query")
         if not isinstance(expanded, str):
             raise LLMError("LLM 查询扩展结果缺少 expanded_query")
-        # temporal 字段不合法时按无时间约束处理，不视为失败。
-        temporal = parse_temporal(parsed.get("temporal"))
-        return QueryExpansion(text=expanded.strip()[:4000], temporal=temporal)
+        return QueryExpansion(text=expanded.strip()[:4000], temporal=None)
+
+    def extract_temporal(self, query: str) -> TemporalConstraints | None:
+        parsed = self._json_completion(
+            TEMPORAL_EXTRACTION_PROMPT, {"query": query}, max_tokens=512,
+        )
+        return parse_grounded_temporal(parsed.get("temporal"), query)
 
 
 def build_memory_llm(settings: Settings) -> MemoryLLM:

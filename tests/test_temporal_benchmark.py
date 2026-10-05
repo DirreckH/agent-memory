@@ -13,7 +13,7 @@ import pytest
 
 from app.config import Settings
 from app.embeddings import normalize_rows
-from app.llm import QueryExpansion
+from app.llm import NoOpMemoryLLM, QueryExpansion
 from app.service import MemoryService
 from app.storage import SQLiteMemoryStore
 from app.temporal import parse_temporal
@@ -23,6 +23,7 @@ from scripts.benchmark_common import (
     rank_of_keyword,
 )
 from scripts.run_temporal_ab import (
+    BenchmarkMemoryService,
     OracleMemoryLLM,
     build_oracle_expansions,
     extraction_report,
@@ -236,3 +237,30 @@ def test_extraction_report_measures_signature_agreement() -> None:
     report = extraction_report([case], empty)
     assert report["agreement_rate"] == 0.0
     assert report["per_case"][0]["got"] == ""
+
+
+def test_oracle_benchmark_keeps_fixture_constraint_even_when_rules_differ(tmp_path: Path) -> None:
+    query = "最近一周我说的新爱好是什么？"
+    # 使用不同于规则的一份固定约束，确保 oracle 对比没有偷偷改用规则结果。
+    expected = parse_temporal({"windows": [{
+        "kind": "rolling", "unit": "day", "amount": 30, "direction": "past",
+    }]})
+    settings = Settings(_env_file=None, database_path=tmp_path / "oracle.db")
+    service = BenchmarkMemoryService(
+        settings, SQLiteMemoryStore(settings.database_path), BagOfWordsEmbedder(),
+        OracleMemoryLLM({query: QueryExpansion("", expected)}),
+    )
+    assert service._query_temporal(query) == expected
+    assert service.extractions[query].temporal == expected
+
+
+def test_benchmark_records_constraints_from_rules_without_llm(tmp_path: Path) -> None:
+    settings = Settings(_env_file=None, database_path=tmp_path / "rules.db")
+    service = BenchmarkMemoryService(
+        settings, SQLiteMemoryStore(settings.database_path), BagOfWordsEmbedder(),
+        NoOpMemoryLLM(),
+    )
+    actual = service._query_temporal("今天的项目更新")
+    assert actual.relative_window.kind == "calendar"
+    assert actual.relative_window.offset == 0
+    assert service.extractions["今天的项目更新"].temporal == actual

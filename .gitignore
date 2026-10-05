@@ -10,6 +10,7 @@ data/
 *.db-shm
 *.db-wal
 .DS_Store
+docs/
 
 # FastEmbed/ONNX Runtime may create this telemetry session marker on macOS.
 :memory:.ses

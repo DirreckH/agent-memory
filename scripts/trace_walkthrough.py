@@ -15,7 +15,8 @@ from app.llm import QueryExpansion
 from app.schemas import MemoryMessage
 from app.service import MemoryService
 from app.storage import SQLiteMemoryStore
-from app.temporal import EventAnchorSpec, parse_temporal, time_match
+from app.temporal import EventAnchorSpec, time_match
+from app.temporal_extraction import parse_grounded_temporal
 
 NOW = 1_800_000_000_000
 DAY = 86_400_000
@@ -33,6 +34,9 @@ class StubLLM:
     def expand_query(self, query, options):
         return self.expansion
 
+    def extract_temporal(self, query):
+        return self.expansion.temporal
+
 
 settings = Settings(
     _env_file=None, database_path=Path(tempfile.mkdtemp()) / "trace.db"
@@ -42,10 +46,14 @@ embedder = FastEmbedder(
     cache_dir=settings.embedding_cache_dir,
     threads=1,
 )
+query = "搬到滨江路之后我养了什么宠物？"
 expansion = QueryExpansion(
     text="搬到滨江路之后养的宠物；新家养的动物",
-    temporal=parse_temporal(
-        {"event_anchor": {"event": "搬到滨江路", "direction": "after"}}
+    temporal=parse_grounded_temporal(
+        {"event_anchor": {
+            "event": "搬到滨江路", "direction": "after",
+            "evidence": "搬到滨江路之后",
+        }}, query,
     ),
 )
 service = MemoryService(
@@ -68,7 +76,6 @@ service.add(
     session_id="session-1",
 )
 
-query = "搬到滨江路之后我养了什么宠物？"
 records = service.store.fetch_by_user("user-1")
 context = service._resolve_temporal_context(query, expansion.temporal, records)
 print("WINDOW:", context.window, "ordering:", context.ordering)

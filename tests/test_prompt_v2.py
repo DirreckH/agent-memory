@@ -62,6 +62,8 @@ def make_app(tmp_path: Path, llm: OpenAICompatibleMemoryLLM, mode: str = "strict
         database_path=tmp_path / "memory.db",
         llm_provider="none",
         llm_failure_mode=mode,
+        # 本模块隔离验证写入/扩展；独立时间抽取由 test_temporal_extraction 覆盖。
+        temporal_extraction_mode="off",
         memory_api_key="",
         warmup_embedding_on_startup=False,
         semantic_weight=1,

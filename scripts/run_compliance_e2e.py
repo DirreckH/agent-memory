@@ -278,16 +278,17 @@ def main() -> int:
                     [{"role": "user", "content": "我下个月要搬到滨江区的新公寓。"}]
                 )
                 expansion = llm.expand_query("我最近一周说过什么计划？", None)
-                temporal_ok = expansion.temporal is None or bool(
-                    expansion.temporal.relative_window
-                    or expansion.temporal.event_anchor
-                    or expansion.temporal.ordering
+                temporal = llm.extract_temporal("我最近一周说过什么计划？")
+                temporal_ok = temporal is not None and bool(
+                    temporal.relative_window
+                    or temporal.event_anchor
+                    or temporal.ordering
                 )
                 ok = bool(enriched) and expansion.text.strip() != "" and temporal_ok
                 evidence = (
                     f"enrich={list(enriched.values())[0][:40]}…；"
                     f"expand={expansion.text[:40]}…；"
-                    f"temporal={'有' if expansion.temporal else '无'}"
+                    f"temporal={'有' if temporal else '无'}"
                 )
                 report.add(
                     "gpt-4o-mini 增强与扩展（直连探测）", "PASS" if ok else "FAIL", evidence

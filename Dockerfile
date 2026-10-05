@@ -11,6 +11,9 @@ RUN python -m pip install --upgrade pip && \
     python -m pip install -r requirements.txt
 
 COPY app ./app
+# scripts/ 一并打入镜像，容器内可直接运行线上自检：
+#   docker compose exec agent-memory python -m scripts.run_compliance_e2e.py
+COPY scripts ./scripts
 RUN mkdir -p /app/data/model_cache
 
 EXPOSE 8000

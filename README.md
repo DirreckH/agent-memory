@@ -22,13 +22,14 @@
 app/
 ├── config.py       # 环境变量配置
 ├── embeddings.py   # FastEmbed/ONNX 向量模型
-├── llm.py          # DeepSeek/OpenAI 兼容调用与结构化查询扩展
+├── llm.py          # DeepSeek/OpenAI 调用；查询扩展与时间抽取独立
 ├── main.py         # FastAPI 路由
 ├── prompts.py      # 写入增强 V2 与查询扩展 V3 提示词
 ├── schemas.py      # 两套接口契约
 ├── service.py      # 写入、混合检索、时间感知打分
 ├── storage.py      # SQLite、幂等、user_id 隔离
-└── temporal.py     # 时间约束解析、窗口计算、衰减打分（纯函数）
+├── temporal.py     # 时间约束解析、窗口计算、衰减打分（纯函数）
+└── temporal_extraction.py  # 常见表达规则、LLM 字段与原文证据校验
 scripts/
 ├── generate_benchmark.py   # 用 DeepSeek 生成严格校验的合成数据
 └── run_benchmark.py        # 只通过 /set、/get 执行批量评测
@@ -56,7 +57,7 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ## 2. LLM 配置（可选）
 
-LLM 负责三件事：Add 时生成事实保真的索引增强文本；Search 时扩展同义表达；从查询中抽取结构化时间约束（V3）。提示词明确禁止回答问题或判断选项，返回的 `content` 始终是原始消息。
+LLM 可用于三件事：Add 时生成事实保真的索引增强文本；Search 时扩展同义表达；规则无法完整解析时，从原查询中抽取带证据的时间约束（V3）。查询扩展和时间抽取独立调用、独立控制；常见时间表达无需 LLM。提示词明确禁止回答问题或判断选项，返回的 `content` 始终是原始消息。
 
 DeepSeek（本地实验，默认 `deepseek-v4-flash`）：
 
@@ -86,26 +87,34 @@ DASHSCOPE_API_KEY=你的百炼密钥
 
 切换后向量维度从本地 MiniLM 的 384 变为 1024（默认，可选 64-2048），**必须使用全新数据库，不能混用分数**。`text-embedding-v4` 单次请求最多 10 条文本，由服务内部自动分批；兼容端点复用 OpenAI SDK，无需新增依赖。
 
-`LLM_FAILURE_MODE=fallback` 时上游异常自动退回纯向量检索；`strict` 时返回可重试的 HTTP 503，便于压测时暴露上游问题。
+`LLM_FAILURE_MODE=fallback` 时放弃失败的增强、扩展或复杂时间抽取，保留已确认的规则时间约束；`strict` 时返回可重试的 HTTP 503，便于压测时暴露上游问题。
 
 ## 3. 时间感知检索（V3）
 
-针对长期多轮对话中的时间序列推理，V3 把时间处理拆成“LLM 抽取 + 确定性解析”两层：
+针对长期多轮对话中的时间序列推理，V3 把时间处理拆成“规则优先、LLM 补充抽取 + 确定性解析”两层：
 
-- 查询扩展提示词 V3 输出结构化时间约束：滚动窗口（“最近三个月”）、日历窗口（“上个月”）、事件锚点（“搬家之前”）、首末次排序（“第一次/最后一次”）。模型不知道也不计算当前时间，不做任何日期换算；
-- 绝对窗口由 `app/temporal.py` 纯函数计算。锚点优先取该 user 的对话前沿（记忆中最大事件时间），全库无时间信息才回退服务器时钟；
-- 软模式（默认）：`分数 = w_sem·语义 + w_lex·词法 + w_time·time_match`。窗口内得 1.0，窗口外按半衰期衰减，**无时间戳记录取中性值 0.5，永不惩罚**；
-- 严格模式：窗口内候选足够时截掉窗口外记录；时间未知的记录始终保留；
-- 事件锚定采用两阶段检索：先用事件短语定位最佳命中记录，以其事件时间为窗口边界，置信度低于阈值则放弃约束、退回常规检索；
-- 程序化守卫：LLM 声称的时间约束必须能在查询原文中回查到时间信号，否则视为幻觉丢弃；
+- 常见表达（“昨天、今天、本月、过去三天、last week”等）先由规则解析；复杂表达通过独立 LLM 入口抽取。只读取原查询，不读取候选项或扩展文本。关闭查询扩展、或设置 `LLM_PROVIDER=none`，均不影响常见规则；
+- 绝对窗口由 `app/temporal.py` 纯函数计算。显式查询时间优先；默认 `replay` 模式取该 user 的最大有效 `source_timestamp`，没有源消息时间时放弃相对窗口；`realtime` 模式固定使用本次检索开始时刻（在 LLM/向量调用之前捕获）；
+- 记录时间只取源消息时间，缺失或不可解析时保持未知，**不回退到 `created_at`**，因此补录的入库时间不会移动历史查询锚点；
+- 软模式（默认）：`分数 = w_sem·语义 + w_lex·词法 + w_time·time_match`。窗口内得 1.0，窗口外按半衰期衰减，无时间戳记录的时间项固定为 0.5，仍受最终相关度阈值约束；
+- 窗口端点：过去滚动窗口为 `[参考时刻−长度, 参考时刻]`，包含最新记录；未来滚动窗口为 `[参考时刻, 参考时刻+长度)`；日历窗口左闭右开；事件“之前/之后”均不含事件时刻。日历计算仍使用 UTC；
+- 严格模式：通过现有分数门槛后，依次返回“确认在窗内 → 时间未知 → 窗外补充”；各组内部按分数或首末次排序，最后统一截取 `top_k`。未知时间不冒充窗内证据，增大 `top_k` 不会让补充记录越过窗内记录。`strict` 保留不足时补充的语义，并非窗外一律禁止返回；
+- 事件锚定采用两阶段检索：先用事件短语定位最佳命中记录，以其源消息时间代理事件边界，源时间未知或置信度不足时放弃该事件约束；尚未抽取正文中的事件发生时间；
+- 程序化校验：核验数量、单位、方向、范围和原文证据；非法方向不再补为 `past`。事件短语须是原文片段，且前后关系一致。多窗口、无法完整表达的组合或模糊数量保守回退，不只采用其中一个条件；
 - `TEMPORAL_MODE=off` 时打分路径与旧版逐位一致，可安全回归。
 
 ```dotenv
 TEMPORAL_MODE=soft                  # off / soft / strict
+TEMPORAL_EXTRACTION_MODE=hybrid     # off / rules / hybrid；独立于 LLM_SEARCH_EXPANSION
+TEMPORAL_REFERENCE_MODE=replay      # replay / realtime；与打分模式独立
 TEMPORAL_WEIGHT=0.20                # 时间项权重（与 0.8/0.2 三路归一化）
 TEMPORAL_DECAY_HALF_LIFE_DAYS=30    # 窗口外距离衰减的半衰期
 TEMPORAL_EVENT_ANCHOR_MIN_SCORE=0.30 # 事件锚点定位的最低置信分
 ```
+
+内部调用可通过 `MemoryService.search(..., query_time_ms=毫秒时间戳)` 指定参考时间，优先于上述模式；HTTP 请求字段保持不变。参考时间来源记录为 `query_time` / `conversation_frontier` / `request_time` / `unavailable`，可通过调试日志核对。回放缺少源消息时间且未指定查询时间时，退回普通检索；全部记录时间未知时也不执行首末次排序。
+
+`TEMPORAL_EXTRACTION_MODE=rules` 仅启用本地规则；默认 `hybrid` 仅在规则不能完整解析且 LLM 可用时调用复杂抽取。复杂查询同时开启扩展时可能有两次 LLM 调用；规则命中不会增加时间抽取调用。`off` 只关闭时间抽取；`TEMPORAL_MODE=off` 则旁路全部时间处理。
 
 ## 4. curl 验证
 
@@ -135,7 +144,11 @@ curl.exe -X POST "http://127.0.0.1:8000/get" -H "Content-Type: application/json"
 python -m pytest
 ```
 
-全部测试使用确定性的离线假向量器与桩 LLM，不下载模型、不调用外部 API。71 个用例覆盖：简化/官网双协议契约、`user_id` 严格隔离、Add 幂等与冲突检测、可选鉴权、提示词 V2/V3 数据流、时间窗口数学（日历/滚动/月末收敛）、软打分与严格模式、事件锚定、幻觉守卫，以及 `TEMPORAL_MODE=off` 与旧版分数逐位一致的回归断言。
+全部测试使用确定性的离线假向量器与桩 LLM，不下载模型、不调用外部 API。用例覆盖：简化/官网双协议契约、`user_id` 严格隔离、Add 幂等与冲突检测、可选鉴权、提示词 V2/V3 数据流、时间窗口数学（日历/滚动/月末收敛）、软打分与严格模式、事件锚定、幻觉守卫，以及 `TEMPORAL_MODE=off` 与旧版分数逐位一致的回归断言。`tests/test_temporal_reference.py` 另覆盖回放/实时模式、显式查询时间优先、补录与未知时间回退、跨月调用及接口兼容；本机 HTTP 测试需要允许监听回环端口。
+
+2026-10-03 修订增加 `test_temporal_policy.py`、`test_temporal_extraction.py`：覆盖端点、严格模式各组顺序与 `top_k` 前缀稳定性、常见规则、原文证据、独立开关和失败回退。验证记录见 [V3 方案 §6.2](docs/v3-temporal-retrieval.md#62-窗口与抽取修订验证2026-10-03)。
+
+2026-10-04 使用现有 GPT-4o-mini 配置完成真实 A/B 与严格模式专项，并修复 JSON 模式缺少明确输出声明的问题；完整离线回归为 224 项通过。实测结果与两个尚未覆盖的英文表达见 [真实 LLM 验证记录](docs/v3-real-llm-validation-2026-10-04.md)。
 
 ## 7. 合成数据批量测试
 
