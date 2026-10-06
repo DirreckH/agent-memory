@@ -272,36 +272,44 @@ def main() -> int:
 
         # ---- LLM 直连探测（真实 gpt-4o-mini） ----
         if llm_ready:
-            llm = app.state.memory_service.llm
+            service = app.state.memory_service
+            llm = service.llm
             try:
                 enriched = llm.enrich_messages(
                     [{"role": "user", "content": "我下个月要搬到滨江区的新公寓。"}]
                 )
                 expansion = llm.expand_query("我最近一周说过什么计划？", None)
-                temporal = llm.extract_temporal("我最近一周说过什么计划？")
-                temporal_ok = temporal is not None and bool(
-                    temporal.relative_window
-                    or temporal.event_anchor
-                    or temporal.ordering
+                # 时间约束是独立于扩展文本的抽取通路：
+                # 简单窗口由规则层确定性负责（LLM 对其正确输出 null），
+                # LLM 层只负责事件锚定表达——各测各的，不互相冒充。
+                rules_temporal = service._query_temporal("我最近一周说过什么计划？")
+                anchor_temporal = llm.extract_temporal("搬到上海之前，我住在哪里？")
+                ok = (
+                    bool(enriched)
+                    and expansion.text.strip() != ""
+                    and rules_temporal is not None
+                    and anchor_temporal is not None
                 )
-                ok = bool(enriched) and expansion.text.strip() != "" and temporal_ok
                 evidence = (
                     f"enrich={list(enriched.values())[0][:40]}…；"
                     f"expand={expansion.text[:40]}…；"
-                    f"temporal={'有' if temporal else '无'}"
+                    f"规则窗口={'有' if rules_temporal else '无'}；"
+                    f"LLM事件锚={'有' if anchor_temporal else '无'}"
                 )
                 report.add(
-                    "gpt-4o-mini 增强与扩展（直连探测）", "PASS" if ok else "FAIL", evidence
+                    "gpt-4o-mini 增强/扩展/时间抽取（直连探测）",
+                    "PASS" if ok else "FAIL",
+                    evidence,
                 )
             except Exception as exc:  # noqa: BLE001 - 探测失败必须显式暴露
                 report.add(
-                    "gpt-4o-mini 增强与扩展（直连探测）",
+                    "gpt-4o-mini 增强/扩展/时间抽取（直连探测）",
                     "FAIL",
                     f"{type(exc).__name__}: {str(exc)[:120]}",
                 )
         else:
             report.add(
-                "gpt-4o-mini 增强与扩展（直连探测）",
+                "gpt-4o-mini 增强/扩展/时间抽取（直连探测）",
                 "BLOCKED",
                 "等待 OPENAI_API_KEY",
             )
