@@ -7,6 +7,7 @@ import math
 import re
 import time
 import uuid
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -15,6 +16,7 @@ import numpy as np
 from app.config import Settings
 from app.embeddings import Embedder, EmbeddingError
 from app.llm import LLMError, MemoryLLM, QueryExpansion
+from app.multihop import parse_retrieval_steps, supplement_multihop
 from app.schemas import MemoryMessage
 from app.storage import MemoryToStore, SQLiteMemoryStore, StoredMemory
 from app.temporal import (
@@ -97,8 +99,10 @@ def _tokenize(text: str) -> set[str]:
 
 
 def _lexical_similarity(query: str, document: str) -> float:
-    query_tokens = _tokenize(query)
-    document_tokens = _tokenize(document)
+    return _lexical_token_similarity(_tokenize(query), _tokenize(document))
+
+
+def _lexical_token_similarity(query_tokens: set[str], document_tokens: set[str]) -> float:
     if not query_tokens or not document_tokens:
         return 0.0
     overlap = len(query_tokens & document_tokens)
@@ -112,14 +116,20 @@ class MemoryService:
         store: SQLiteMemoryStore,
         embedder: Embedder,
         llm: MemoryLLM,
+        *, governance_retriever=None,
     ) -> None:
         self.settings = settings
         self.store = store
         self.embedder = embedder
         self.llm = llm
+        self.governance_retriever = governance_retriever
+        self._governance_diagnostics = threading.local()
 
     def initialize(self) -> None:
         self.store.initialize()
+        if self.settings.governance_mode != "off":
+            from app.governance.extraction import encoding
+            encoding()  # 预算计时前预热固定 tokenizer。
         deleted = self.store.prune_older_than(self.settings.data_retention_days)
         if deleted:
             logger.info("已按数据保留策略清理 %s 个过期写入批次", deleted)
@@ -268,15 +278,28 @@ class MemoryService:
                             source_timestamp, persistence_time
                         ),
                         source_timestamp=source_timestamp,
+                        raw_content=str(message["content"]),
                     )
                 )
-            self.store.complete_request(request_id, records)
+            batch = None
+            if self.settings.governance_mode != "off":
+                from app.governance.extraction import FactIndexer, FactIndexLLM
+                from app.governance.models import Source
+                sources = [Source(r.id, r.raw_content, r.role, r.session_id, r.ordinal,
+                                  r.source_timestamp) for r in records]
+                batch = FactIndexer().extract(sources, FactIndexLLM(self.llm), self.settings)
+                self._record_index_metrics(batch)
+                if self.settings.governance_mode == "active" and self.settings.governance_strict_write and not batch.complete:
+                    raise LLMError("治理事实索引不完整")
+            self.store.complete_request(should_process, records, batch)
+            if batch is not None:
+                self.rebuild_summaries(user_id)
             return len(records)
         except (LLMError, EmbeddingError) as exc:
-            self.store.mark_failed(request_id, type(exc).__name__)
+            self.store.mark_failed(should_process, type(exc).__name__)
             raise MemoryServiceUnavailable(str(exc)) from exc
         except Exception as exc:
-            self.store.mark_failed(request_id, type(exc).__name__)
+            self.store.mark_failed(should_process, type(exc).__name__)
             raise
 
     def add_simple(self, memory_text: str) -> int:
@@ -289,6 +312,55 @@ class MemoryService:
             session_id=session_id,
             simple=True,
         )
+
+    def rebuild_summaries(self, user_id: str, generation: int | None = None) -> bool:
+        from app.governance.summaries import SummaryBuilder
+        try:
+            snapshot = self.store.fetch_by_user(user_id, governance=True, generation=generation)
+            reference = resolve_anchor([s.timestamp for s in snapshot.sources.values()],
+                                       now_ms=int(time.time() * 1000), mode=self.settings.temporal_reference_mode)
+            summary = SummaryBuilder().build(snapshot, budget_ms=self.settings.governance_summary_budget_ms,
+                                            reference=reference.timestamp_ms)
+            return self.store.publish_summaries(user_id, summary)
+        except Exception as exc:
+            logger.warning("治理摘要未发布 error_type=%s", type(exc).__name__)
+            return False
+
+    def index_sources(self, user_id: str, *, generation: int | None = None, source_ids=None) -> dict:
+        """维护入口读取存储原文；不调用 Add 或向量器。缺失/失败来源形成持久修复队列。"""
+        from app.governance.extraction import FactIndexer, FactIndexLLM
+        snapshot = self.store.fetch_by_user(user_id, governance=True, generation=generation)
+        ids = set(source_ids) if source_ids is not None else set(snapshot.incomplete)
+        sources = [s for sid, s in snapshot.sources.items() if sid in ids]
+        if not sources:
+            return {"generation": snapshot.generation, "processed": 0, "complete": not snapshot.incomplete, "committed": True}
+        # 新库的首个维护任务先建立独立代次，避免隐式激活未完成的索引。
+        if snapshot.revision == 0 and generation is None:
+            generation = self.store.create_index_generation(user_id)
+            snapshot = self.store.fetch_by_user(user_id, governance=True, generation=generation)
+        batch = FactIndexer().extract(sources, FactIndexLLM(self.llm), self.settings)
+        self._record_index_metrics(batch)
+        committed = self.store.commit_index_batch(user_id, snapshot.generation, snapshot.revision, batch)
+        if committed:
+            self.rebuild_summaries(user_id, snapshot.generation)
+        latest = self.store.fetch_by_user(user_id, governance=True, generation=snapshot.generation)
+        return {"generation": snapshot.generation, "processed": len(sources),
+                "complete": committed and not latest.incomplete, "committed": committed,
+                "model_calls": batch.model_calls, "extraction_elapsed_ms": batch.elapsed_ms,
+                "statuses": {name: sum(s.status == name for s in batch.statuses)
+                             for name in ('ready','no_fact','partial','pending','failed')}}
+
+    @property
+    def last_index_metrics(self) -> dict:
+        return getattr(self._governance_diagnostics, 'index', {})
+
+    def _record_index_metrics(self, batch) -> None:
+        metrics = {'model_calls': batch.model_calls, 'elapsed_ms': batch.elapsed_ms,
+                   'sources': len(batch.statuses), 'facts': len(batch.facts),
+                   'incomplete': sum(s.status not in ('ready','no_fact') for s in batch.statuses)}
+        self._governance_diagnostics.index = metrics
+        logger.info('治理写入 model_calls=%s sources=%s facts=%s incomplete=%s elapsed_ms=%.3f',
+                    metrics['model_calls'], metrics['sources'], metrics['facts'], metrics['incomplete'], metrics['elapsed_ms'])
 
     @staticmethod
     def _record_time_ms(record: StoredMemory) -> int | None:
@@ -395,13 +467,15 @@ class MemoryService:
         *,
         weights: tuple[float, float, float],
         time_match: float | None,
+        lexical_score: float | None = None,
     ) -> float | None:
         if record.embedding.shape != query_vector.shape:
             # 更换向量模型后旧向量维度可能不同；跳过而非返回错误结果。
             return None
         cosine = float(np.dot(query_vector, record.embedding))
         semantic = max(0.0, min(1.0, cosine))
-        lexical = _lexical_similarity(query_text, record.search_text)
+        lexical = (_lexical_similarity(query_text, record.search_text)
+                   if lexical_score is None else lexical_score)
         # 无时间约束时 time_match 为 None，加权路径与旧实现逐位一致。
         score = weights[0] * semantic + weights[1] * lexical
         if time_match is not None:
@@ -458,6 +532,7 @@ class MemoryService:
         request_time_ms = int(time.time() * 1000)
         if len(query) > self.settings.max_query_chars:
             raise ValueError("query 超过 MAX_QUERY_CHARS 限制")
+        limit = min(top_k, self.settings.max_top_k, self.settings.candidate_pool_size)
 
         try:
             temporal = self._query_temporal(query)
@@ -476,11 +551,39 @@ class MemoryService:
                     query_texts.append(expanded_text)
                 else:
                     query_texts = [expanded_text]
-            query_vectors = self.embedder.embed(query_texts)
+            steps = ()
+            if (self.settings.multihop_enabled and self.llm.enabled and temporal is None
+                    and limit >= self.settings.multihop_min_top_k):
+                steps = parse_retrieval_steps(getattr(expansion, 'retrieval_steps', ()), query)
+            # 与原查询共用一个批次；新增文本只含问题目标，不包含记忆原文。
+            embed_goals = bool(steps and self.settings.multihop_embed_goals)
+            embedding_texts = query_texts + ([step.query for step in steps] if embed_goals else [])
+            try:
+                vectors = self.embedder.embed(embedding_texts)
+                if len(vectors) != len(embedding_texts):
+                    raise EmbeddingError('查询向量数量不一致')
+            except EmbeddingError:
+                if not steps:
+                    raise
+                logger.warning('多跳目标向量失败，已回退到基础查询向量')
+                steps = ()
+                vectors = self.embedder.embed(query_texts)
+            query_vectors = vectors[:len(query_texts)]
+            step_vectors = (vectors[len(query_texts):] if embed_goals
+                            else np.repeat(query_vectors[:1], len(steps), axis=0))
         except (LLMError, EmbeddingError) as exc:
             raise MemoryServiceUnavailable(str(exc)) from exc
 
-        records = self.store.fetch_by_user(user_id)
+        snapshot = None
+        wants_governance = self.settings.governance_mode != "off"
+        if wants_governance:
+            from app.governance.retrieval import needs_governance
+            wants_governance = needs_governance(query)
+        if wants_governance:
+            snapshot = self.store.fetch_by_user(user_id, governance=True)
+            records = list(snapshot.records)
+        else:
+            records = self.store.fetch_by_user(user_id)
         context = self._resolve_temporal_context(
             query,
             temporal,
@@ -496,6 +599,18 @@ class MemoryService:
             # 无时间窗口时退回二元权重，行为与旧实现一致。
             weights = self.settings.normalized_score_weights + (0.0,)
 
+        # 一次查询中复用分词结果，避免每个目标重复处理全部文档；公式保持一致。
+        document_tokens = {record.id: _tokenize(record.search_text) for record in records}
+        query_tokens: dict[str, set[str]] = {}
+
+        def score_record(text, vector, record, time_match=None):
+            if text not in query_tokens:
+                query_tokens[text] = _tokenize(text)
+            return self._score_record(
+                text, vector, record, weights=weights, time_match=time_match,
+                lexical_score=_lexical_token_similarity(query_tokens[text], document_tokens[record.id]),
+            )
+
         scored: list[tuple[float, StoredMemory, int | None]] = []
         for record in records:
             record_time = self._record_time_ms(record)
@@ -510,11 +625,10 @@ class MemoryService:
             )
             best: float | None = None
             for index, text in enumerate(query_texts):
-                score = self._score_record(
+                score = score_record(
                     text,
                     query_vectors[index],
                     record,
-                    weights=weights,
                     time_match=bonus,
                 )
                 if score is not None and (best is None or score > best):
@@ -522,13 +636,31 @@ class MemoryService:
             if best is not None and best >= self.settings.min_relevance_score:
                 scored.append((best, record, record_time))
 
-        limit = min(top_k, self.settings.max_top_k, self.settings.candidate_pool_size)
         ordering = context.ordering if context else None
         if self.settings.temporal_mode == "strict" and window is not None:
             scored = self._rank_strict_temporal_candidates(scored, window, ordering)
         else:
             self._sort_scored(scored, ordering)
-        return [
+        governance_plan = None
+        if snapshot is not None:
+            from app.governance.retrieval import plan
+            governance_plan = plan(query, snapshot)
+        active_governance = (self.settings.governance_mode == "active" and governance_plan is not None
+                             and governance_plan.intent != "ordinary")
+        if not active_governance and steps and context is None and len(scored) < limit:
+            scored = supplement_multihop(
+                steps=steps, records=records, baseline=scored,
+                step_vectors=step_vectors, score_record=score_record,
+                min_score=self.settings.min_relevance_score,
+                max_rounds=self.settings.multihop_max_rounds,
+                seed_limit=self.settings.multihop_seed_limit,
+                bridge_limit=self.settings.multihop_bridge_limit,
+                supplement_limit=self.settings.multihop_supplement_limit,
+                budget_seconds=self.settings.multihop_budget_seconds,
+                protected_prefix=limit,
+                context_radius=self.settings.multihop_context_radius,
+            )
+        hits = [
             SearchHit(
                 id=record.id,
                 content=record.content,
@@ -537,6 +669,23 @@ class MemoryService:
             )
             for score, record, _ in scored[:limit]
         ]
+        if snapshot is not None:
+            from app.governance.retrieval import GovernanceRetriever, GovernanceSearchContext
+            reference = resolve_anchor([s.timestamp for s in snapshot.sources.values()], now_ms=request_time_ms,
+                                       mode=self.settings.temporal_reference_mode, query_time_ms=query_time_ms)
+            gov_steps = parse_retrieval_steps(getattr(expansion, "retrieval_steps", ()), query)
+            started = time.perf_counter()
+            retriever = self.governance_retriever or GovernanceRetriever()
+            governed = retriever.retrieve(snapshot, GovernanceSearchContext(
+                query, hits, reference.timestamp_ms, self.settings, limit, gov_steps,
+                tuple(query_texts), query_vectors,
+                lambda t, v, r: self._score_record(t, v, r, weights=weights, time_match=None), window))
+            logger.info("治理检索 mode=%s intent=%s incomplete=%s elapsed_ms=%.3f",
+                        self.settings.governance_mode, governance_plan.intent, len(snapshot.incomplete),
+                        (time.perf_counter() - started) * 1000)
+            if self.settings.governance_mode == "active":
+                return governed[:limit]
+        return hits
 
     def search_simple(self, query: str) -> list[SearchHit]:
         return self.search(

@@ -4,6 +4,7 @@ uvicorn[standard]>=0.27,<1.0
 pydantic>=2.6,<3.0
 pydantic-settings>=2.2,<3.0
 numpy>=1.26,<3.0
+tiktoken==0.13.0
 fastembed>=0.6,<0.9
 openai>=1.30,<3.0
 

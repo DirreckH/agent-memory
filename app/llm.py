@@ -6,8 +6,10 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from app.config import Settings
+from app.multihop import RetrievalStep, parse_retrieval_steps, steps_from_expansion
 from app.prompts import (
     ADD_ENRICHMENT_PROMPT_V2,
+    QUERY_EXPANSION_PROMPT_MULTIHOP,
     QUERY_EXPANSION_PROMPT_V3,
     TEMPORAL_EXTRACTION_PROMPT,
 )
@@ -25,6 +27,7 @@ class QueryExpansion:
 
     text: str
     temporal: TemporalConstraints | None
+    retrieval_steps: tuple[RetrievalStep, ...] = ()
 
 
 class MemoryLLM(Protocol):
@@ -72,12 +75,16 @@ class OpenAICompatibleMemoryLLM:
         max_retries: int,
         add_enrichment: bool,
         search_expansion: bool,
+        multihop_retrieval: bool = False,
+        multihop_structured_planner: bool = False,
     ) -> None:
         self.connection = connection
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
         self.add_enrichment = add_enrichment
         self.search_expansion = search_expansion
+        self.multihop_retrieval = multihop_retrieval
+        self.multihop_structured_planner = multihop_structured_planner
         self._client = None
         self._client_lock = threading.Lock()
 
@@ -156,15 +163,24 @@ class OpenAICompatibleMemoryLLM:
         if not self.search_expansion:
             return QueryExpansion(text="", temporal=None)
 
+        structured = self.multihop_retrieval and self.multihop_structured_planner
         parsed = self._json_completion(
-            QUERY_EXPANSION_PROMPT_V3,
+            QUERY_EXPANSION_PROMPT_MULTIHOP if structured else QUERY_EXPANSION_PROMPT_V3,
             {"query": query, "options": options or []},
-            max_tokens=512,
+            max_tokens=1024 if structured else 512,
         )
         expanded = parsed.get("expanded_query")
         if not isinstance(expanded, str):
             raise LLMError("LLM 查询扩展结果缺少 expanded_query")
-        return QueryExpansion(text=expanded.strip()[:4000], temporal=None)
+        steps = ()
+        if self.multihop_retrieval:
+            steps = parse_retrieval_steps(parsed.get('retrieval_steps'), query)
+            if parsed.get('retrieval_steps') is None and not structured:
+                steps = steps_from_expansion(query, expanded)
+        return QueryExpansion(
+            text=expanded.strip()[:4000], temporal=None,
+            retrieval_steps=steps,
+        )
 
     def extract_temporal(self, query: str) -> TemporalConstraints | None:
         parsed = self._json_completion(
@@ -214,4 +230,6 @@ def build_memory_llm(settings: Settings) -> MemoryLLM:
         max_retries=settings.llm_max_retries,
         add_enrichment=settings.llm_add_enrichment,
         search_expansion=settings.llm_search_expansion,
+        multihop_retrieval=settings.multihop_enabled,
+        multihop_structured_planner=settings.multihop_structured_planner,
     )

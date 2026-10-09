@@ -79,6 +79,30 @@ class Settings(BaseSettings):
     # false 时回退为 V3 的单通道混合查询（扩展文本并入主查询文本）。
     query_dual_channel: bool = True
 
+    # 只对问题原文支持的多步计划启用；时间窗口/首末次查询保留原流程。
+    multihop_enabled: bool = True
+    # 默认复用 V3 扩展中的目标；结构化规划会增加模型输出耗时，需单独评测。
+    multihop_structured_planner: bool = False
+    # 默认复用基础查询向量；启用独立目标向量会增加向量推理耗时。
+    multihop_embed_goals: bool = False
+    multihop_context_radius: int = Field(default=2, ge=0, le=3)
+    multihop_max_rounds: int = Field(default=2, ge=0, le=3)
+    multihop_seed_limit: int = Field(default=3, ge=1, le=8)
+    multihop_bridge_limit: int = Field(default=4, ge=1, le=8)
+    multihop_supplement_limit: int = Field(default=12, ge=1, le=50)
+    multihop_budget_seconds: float = Field(default=6.0, gt=0, le=30.0)
+    multihop_min_top_k: int = Field(default=6, ge=1, le=100)
+
+    # 派生治理索引：默认不改变原有写入和检索，active 必须显式配置。
+    governance_mode: Literal["off", "shadow", "active"] = "off"
+    governance_strict_write: bool = False
+    governance_input_tokens: int = Field(default=3000, ge=256, le=32000)
+    governance_output_tokens: int = Field(default=4096, ge=256, le=16384)
+    governance_add_budget_seconds: float = Field(default=60.0, gt=0, le=300)
+    governance_summary_budget_ms: float = Field(default=50.0, ge=0, le=1000)
+    governance_query_budget_ms: float = Field(default=50.0, ge=0, le=1000)
+    governance_content_tokens: int = Field(default=8192, ge=128, le=64000)
+
     # 接口输入日志：把进入 /set、/get 的请求正文写入 JSONL，用于联调与事后复盘。
     # 日志是评测数据在主库之外的第二份副本：文件按天轮转，保留份数对齐
     # DATA_RETENTION_DAYS，到期自动删除。只记录请求体，永不记录请求头。

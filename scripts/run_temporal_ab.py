@@ -267,13 +267,14 @@ def main() -> int:
     )
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--llm", choices=["oracle", "real"], default="oracle")
+    parser.add_argument("--governance-mode", choices=["off", "shadow"], default="off")
     parser.add_argument(
         "--report", type=Path, default=Path("data/temporal_ab_report.json")
     )
     args = parser.parse_args()
 
     cases = load_temporal_cases(args.dataset)
-    settings = Settings()  # 读取 .env 的 LLM/向量配置
+    settings = Settings(governance_mode=args.governance_mode)  # 读取 .env 的 LLM/向量配置
     embedder = FastEmbedder(
         model_name=settings.embedding_model,
         cache_dir=settings.embedding_cache_dir,
@@ -292,6 +293,7 @@ def main() -> int:
     services: dict[str, MemoryService] = {}
     for mode in MODES:
         mode_settings = Settings(
+            governance_mode=args.governance_mode,
             temporal_mode=mode,
             llm_failure_mode="strict",
             database_path=Path(
@@ -319,6 +321,7 @@ def main() -> int:
             "note": "抽取层由数据集内置期望值代替，本报告只衡量打分层增益。",
         }
     report["llm_mode"] = args.llm
+    report["governance_mode"] = args.governance_mode
     report["embedding_model"] = settings.embedding_model
 
     args.report.parent.mkdir(parents=True, exist_ok=True)
