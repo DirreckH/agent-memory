@@ -1,5 +1,8 @@
 # D1/F1 治理索引实施说明
 
+> 2026-10-13 增量修订及最新证据见 [治理修订验证](GOVERNANCE_REVISION_VALIDATION.md)。
+> 下文原始 280 项验证和性能数据属于上一轮；不得作为本轮真实模型效果结论。
+
 ## 1. 状态与适用边界
 
 【已验证】代码已实现事实版本与抽取式摘要，公共 API 字段保持不变。代码与示例配置
@@ -28,6 +31,9 @@
 | app/governance/resolution.py | 提交时版本关系、当前与历史选择、冲突和未知状态 |
 | app/governance/summaries.py | 会话/阶段、主题、全局摘要及来源依赖 |
 | app/governance/retrieval.py | 本地需求规划、范围覆盖、版本感知多跳、片段预算 |
+| app/governance/planning.py | 有原问题依据的组合计划、日期规范化、范围和知识截止 |
+| app/governance/evidence.py | 校验来源的查询视图、完整原文与时间渲染 |
+| app/governance/assembly.py | 必要证据优先、分区轮询、预算与派生结果 |
 | app/governance/persistence.py | 派生表、复合外键、失效、修复和发布 |
 | app/storage.py | 迁移备份、带令牌租约、原子提交、一致快照与索引代次 |
 | app/service.py | 原流程接入、影子对照、摘要更新和维护接口 |

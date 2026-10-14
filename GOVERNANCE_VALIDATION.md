@@ -2,6 +2,9 @@
 
 日期：2026-10-09。实现与维护说明见 [GOVERNANCE.md](GOVERNANCE.md)。
 
+本文件保留上一轮实验记录；2026-10-13 的代码修订与最新验证见
+[GOVERNANCE_REVISION_VALIDATION.md](GOVERNANCE_REVISION_VALIDATION.md)。
+
 ## 1. 已完成的修改
 
 【已验证】新增独立事实抽取、受控槽位版本解析、来源校验与处理状态、抽取式分层摘要、

@@ -186,7 +186,9 @@ class FactIndexer:
         scope = item.get("scope") or spec.default_scope
         if not isinstance(scope, str) or not scope.strip() or len(scope) > 256:
             raise ValueError("InvalidScope")
-        if spec.cardinality == "unknown" and spec.key not in quote.casefold():
+        if spec.cardinality == "unknown" and not any(
+                re.search(r'(?<!\w)' + re.escape(a) + r'(?!\w)', quote, re.I) if a.isascii()
+                else a.casefold() in quote.casefold() for a in spec.aliases):
             raise ValueError("UngroundedPredicate")
         if scope not in ("general", "work", "home", "temporary") and scope.casefold() not in quote.casefold():
             raise ValueError("UngroundedScope")
@@ -207,7 +209,7 @@ class FactIndexer:
         if operation in ("correct", "change", "retract"):
             update = item.get("update_quote")
             cues = {"correct": r"correction|correct|mistake|actually|更正|纠正|说错|不是|口误",
-                    "change": r"now|moved|changed|switched|left|joined|现在|换|搬|离开|加入|改为",
+                    "change": r"now|moved|changed|switched|left|joined|现在|换|搬|离开|离职|入职|加入|改为",
                     "retract": r"retract|withdraw|no longer|撤回|不再|作废|取消"}
             if (not isinstance(update, str) or chunk.text.count(update) != 1
                     or not re.search(cues[operation], update, re.I)

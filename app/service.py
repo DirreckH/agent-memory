@@ -577,9 +577,6 @@ class MemoryService:
         snapshot = None
         wants_governance = self.settings.governance_mode != "off"
         if wants_governance:
-            from app.governance.retrieval import needs_governance
-            wants_governance = needs_governance(query)
-        if wants_governance:
             snapshot = self.store.fetch_by_user(user_id, governance=True)
             records = list(snapshot.records)
         else:
@@ -641,13 +638,7 @@ class MemoryService:
             scored = self._rank_strict_temporal_candidates(scored, window, ordering)
         else:
             self._sort_scored(scored, ordering)
-        governance_plan = None
-        if snapshot is not None:
-            from app.governance.retrieval import plan
-            governance_plan = plan(query, snapshot)
-        active_governance = (self.settings.governance_mode == "active" and governance_plan is not None
-                             and governance_plan.intent != "ordinary")
-        if not active_governance and steps and context is None and len(scored) < limit:
+        if steps and context is None and len(scored) < limit:
             scored = supplement_multihop(
                 steps=steps, records=records, baseline=scored,
                 step_vectors=step_vectors, score_record=score_record,
@@ -671,15 +662,21 @@ class MemoryService:
         ]
         if snapshot is not None:
             from app.governance.retrieval import GovernanceRetriever, GovernanceSearchContext
-            reference = resolve_anchor([s.timestamp for s in snapshot.sources.values()], now_ms=request_time_ms,
-                                       mode=self.settings.temporal_reference_mode, query_time_ms=query_time_ms)
+            reference = context.reference if context is not None else resolve_anchor(
+                [r.source_timestamp for r in records], now_ms=request_time_ms,
+                mode=self.settings.temporal_reference_mode, query_time_ms=query_time_ms)
+            # 治理只读同一参照及窗口；不改变 V3 的任何查询文本、权重或候选。
+            from app.governance.planning import plan
+            governance_plan = plan(query, snapshot, reference=reference.timestamp_ms,
+                                   window=window, expansion=expansion.text)
             gov_steps = parse_retrieval_steps(getattr(expansion, "retrieval_steps", ()), query)
             started = time.perf_counter()
             retriever = self.governance_retriever or GovernanceRetriever()
             governed = retriever.retrieve(snapshot, GovernanceSearchContext(
                 query, hits, reference.timestamp_ms, self.settings, limit, gov_steps,
                 tuple(query_texts), query_vectors,
-                lambda t, v, r: self._score_record(t, v, r, weights=weights, time_match=None), window))
+                lambda t, v, r: self._score_record(t, v, r, weights=weights, time_match=None), window,
+                governance_plan))
             logger.info("治理检索 mode=%s intent=%s incomplete=%s elapsed_ms=%.3f",
                         self.settings.governance_mode, governance_plan.intent, len(snapshot.incomplete),
                         (time.perf_counter() - started) * 1000)

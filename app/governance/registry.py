@@ -25,10 +25,22 @@ PROPERTIES = (
     PropertySpec("event", ("event", "事件", "决定", "decision"), cardinality="multi", mutable=False, category="events"),
 )
 
+# 关系名称归一化不意味着已知基数，更不赋予隐式“最后写入覆盖”能力。
+RELATION_ALIASES = {
+    'leader': ('leader', 'leads', '负责人', '领导人'),
+    'founder': ('founder', 'founded', '创始人', '创办人'),
+    'owner': ('owner', 'owns', '所有者'),
+    'manager': ('manager', '主管', '经理'),
+    'location': ('location', 'located', '所在地'),
+}
+
 
 def property_spec(key: str) -> PropertySpec:
     folded = key.strip().casefold()
     for spec in PROPERTIES:
         if folded == spec.key or folded in spec.aliases:
             return spec
+    for key, aliases in RELATION_ALIASES.items():
+        if folded == key or folded in aliases:
+            return PropertySpec(key, aliases, 'unknown', False, category='relations')
     return PropertySpec(folded, (folded,), "unknown", False, category="other")

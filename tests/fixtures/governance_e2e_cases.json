@@ -1,0 +1,1849 @@
+{
+  "version": "2",
+  "authorship": "Assistant-authored explicit gold, independent of the tested parser; not externally human-reviewed.",
+  "freeze_policy": "All gold authored before any new model calls; holdout is not used to tune runtime code. No official logs.",
+  "scenarios": [
+    {
+      "id": "address",
+      "split": "development",
+      "category": "D1",
+      "sources": [
+        {
+          "id": "a1",
+          "date": "2025-01-12",
+          "session": "a",
+          "role": "user",
+          "content": "我目前住在杭州。",
+          "oracle_facts": [
+            {
+              "quote": "我目前住在杭州。",
+              "subject": "self",
+              "predicate": "residence",
+              "value": "杭州"
+            }
+          ]
+        },
+        {
+          "id": "a2",
+          "date": "2025-03-04",
+          "session": "b",
+          "role": "user",
+          "content": "我现在住在苏州。",
+          "oracle_facts": [
+            {
+              "quote": "我现在住在苏州。",
+              "subject": "self",
+              "predicate": "residence",
+              "value": "苏州"
+            }
+          ]
+        },
+        {
+          "id": "a3",
+          "date": "2025-03-20",
+          "session": "c",
+          "role": "user",
+          "content": "我计划七月搬到厦门，目前手续尚未办理。",
+          "oracle_facts": [
+            {
+              "quote": "我计划七月搬到厦门，目前手续尚未办理。",
+              "subject": "self",
+              "predicate": "residence",
+              "value": "厦门",
+              "modality": "planned"
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "current",
+          "query": "截至2025-04-01，我目前住在哪里？",
+          "as_of": "2025-04-01",
+          "top_k": 3,
+          "gold": {
+            "answer": "苏州；厦门只是未来计划。",
+            "atoms": [
+              {
+                "claim": "最近确认的住所为苏州",
+                "support": [
+                  {
+                    "source_id": "a2",
+                    "quote": "我现在住在苏州。"
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "目前住在厦门",
+              "目前住在杭州"
+            ],
+            "reason": "a2是较新的明确状态观察；a3不构成已经搬家。",
+            "distractors": [
+              {
+                "source_id": "a1",
+                "risk": "旧住所不能作为当前状态"
+              },
+              {
+                "source_id": "a3",
+                "risk": "未来计划不能视为已搬家"
+              }
+            ]
+          }
+        },
+        {
+          "id": "past",
+          "query": "截至2025-02-01，我当时的住所在哪里？",
+          "as_of": "2025-04-01",
+          "top_k": 3,
+          "gold": {
+            "answer": "当时已记录的住所为杭州。",
+            "atoms": [
+              {
+                "claim": "二月初以前的住所观察为杭州",
+                "support": [
+                  {
+                    "source_id": "a1",
+                    "quote": "我目前住在杭州。"
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "当时住在苏州"
+            ],
+            "reason": "三月真实住所变化不能倒写二月状态。",
+            "distractors": [
+              {
+                "source_id": "a2",
+                "risk": "后来的真实变更不能倒写历史"
+              },
+              {
+                "source_id": "a3",
+                "risk": "计划不能倒写历史"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "correction",
+      "split": "development",
+      "category": "D1/C",
+      "sources": [
+        {
+          "id": "c1",
+          "date": "2025-01-08",
+          "session": "a",
+          "role": "user",
+          "content": "我从2025-01-01起的职位是测试员。",
+          "oracle_facts": [
+            {
+              "quote": "我从2025-01-01起的职位是测试员。",
+              "subject": "self",
+              "predicate": "job_role",
+              "value": "测试员",
+              "valid_from": "2025-01-01",
+              "time_quote": "我从2025-01-01起的职位是测试员。"
+            }
+          ]
+        },
+        {
+          "id": "c2",
+          "date": "2025-02-08",
+          "session": "b",
+          "role": "user",
+          "content": "更正：我从2025-01-01起的职位实际是设计师，之前写成测试员属于笔误。",
+          "oracle_facts": [
+            {
+              "quote": "更正：我从2025-01-01起的职位实际是设计师，之前写成测试员属于笔误。",
+              "subject": "self",
+              "predicate": "job_role",
+              "value": "设计师",
+              "operation": "correct",
+              "target_value": "测试员",
+              "update_quote": "更正：我从2025-01-01起的职位实际是设计师，之前写成测试员属于笔误。",
+              "valid_from": "2025-01-01",
+              "time_quote": "更正：我从2025-01-01起的职位实际是设计师，之前写成测试员属于笔误。"
+            }
+          ]
+        },
+        {
+          "id": "c3",
+          "date": "2025-04-01",
+          "session": "c",
+          "role": "user",
+          "content": "从2025-04-01起，我的职位由设计师改为项目经理。",
+          "oracle_facts": [
+            {
+              "quote": "从2025-04-01起，我的职位由设计师改为项目经理。",
+              "subject": "self",
+              "predicate": "job_role",
+              "value": "项目经理",
+              "operation": "change",
+              "target_value": "设计师",
+              "update_quote": "从2025-04-01起，我的职位由设计师改为项目经理。",
+              "valid_from": "2025-04-01",
+              "time_quote": "从2025-04-01起，我的职位由设计师改为项目经理。"
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "historical_truth",
+          "query": "截至2025-01-20，我的实际职位是什么？请采用后来明确更正的信息。",
+          "as_of": "2025-06-30",
+          "top_k": 3,
+          "gold": {
+            "answer": "设计师。",
+            "atoms": [
+              {
+                "claim": "一月实际职位为设计师",
+                "support": [
+                  {
+                    "source_id": "c2",
+                    "quote": "更正：我从2025-01-01起的职位实际是设计师，之前写成测试员属于笔误。"
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "一月实际职位是测试员",
+              "一月实际职位是项目经理"
+            ],
+            "reason": "二月更正明确追溯一月；四月变更没有追溯效力。",
+            "distractors": [
+              {
+                "source_id": "c1",
+                "risk": "错误旧说法不是真实历史"
+              },
+              {
+                "source_id": "c3",
+                "risk": "四月真实变更不追溯一月或三月"
+              }
+            ]
+          }
+        },
+        {
+          "id": "known_then",
+          "query": "仅根据截至2025-01-20当时已知的记录，我的职位被记成什么？",
+          "as_of": "2025-06-30",
+          "top_k": 3,
+          "gold": {
+            "answer": "当时被记为测试员，尚无后来的更正。",
+            "atoms": [
+              {
+                "claim": "当时记录为测试员",
+                "support": [
+                  {
+                    "source_id": "c1",
+                    "quote": "我从2025-01-01起的职位是测试员。"
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "当时已经记录为设计师"
+            ],
+            "reason": "查询限制知识时点，二月纠正不可作为当时已知信息。",
+            "distractors": [
+              {
+                "source_id": "c2",
+                "risk": "当时已知问题不能引用后来的知识"
+              }
+            ]
+          }
+        },
+        {
+          "id": "real_change",
+          "query": "截至2025-03-01，我的职位是什么？",
+          "as_of": "2025-06-30",
+          "top_k": 3,
+          "gold": {
+            "answer": "设计师。",
+            "atoms": [
+              {
+                "claim": "三月仍为设计师",
+                "support": [
+                  {
+                    "source_id": "c2",
+                    "quote": "更正：我从2025-01-01起的职位实际是设计师，之前写成测试员属于笔误。"
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "三月为项目经理"
+            ],
+            "reason": "四月是真实变更，不应倒写三月。",
+            "distractors": [
+              {
+                "source_id": "c1",
+                "risk": "错误旧说法不是真实历史"
+              },
+              {
+                "source_id": "c3",
+                "risk": "四月真实变更不追溯一月或三月"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "withdrawal",
+      "split": "holdout",
+      "category": "D1",
+      "sources": [
+        {
+          "id": "w1",
+          "date": "2025-01-11",
+          "session": "a",
+          "role": "user",
+          "content": "我目前在霁川研究所工作。",
+          "oracle_facts": [
+            {
+              "quote": "我目前在霁川研究所工作。",
+              "subject": "self",
+              "predicate": "employer",
+              "value": "霁川研究所"
+            }
+          ]
+        },
+        {
+          "id": "w2",
+          "date": "2025-05-06",
+          "session": "b",
+          "role": "user",
+          "content": "我撤回此前关于在霁川研究所工作的说法；当前工作单位暂未说明。",
+          "oracle_facts": [
+            {
+              "quote": "我撤回此前关于在霁川研究所工作的说法；当前工作单位暂未说明。",
+              "subject": "self",
+              "predicate": "employer",
+              "value": "霁川研究所",
+              "operation": "retract",
+              "update_quote": "我撤回此前关于在霁川研究所工作的说法；当前工作单位暂未说明。"
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "unknown",
+          "query": "我目前的工作单位是什么？",
+          "as_of": "2025-06-30",
+          "top_k": 3,
+          "gold": {
+            "answer": "无法确定；霁川研究所的说法已撤回，未提供新的工作单位。",
+            "atoms": [
+              {
+                "claim": "旧说法撤回且当前未说明",
+                "support": [
+                  {
+                    "source_id": "w2",
+                    "quote": "我撤回此前关于在霁川研究所工作的说法；当前工作单位暂未说明。"
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "目前在霁川研究所"
+            ],
+            "reason": "撤回后不能回滚到旧单位或编造新单位。",
+            "distractors": [
+              {
+                "source_id": "w1",
+                "risk": "撤回后不得恢复旧状态"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "relation",
+      "split": "development",
+      "category": "D1/B",
+      "sources": [
+        {
+          "id": "r1",
+          "date": "2025-01-01",
+          "session": "a",
+          "role": "user",
+          "content": "我目前在澄山实验室工作。",
+          "oracle_facts": [
+            {
+              "quote": "我目前在澄山实验室工作。",
+              "subject": "self",
+              "predicate": "employer",
+              "value": "澄山实验室"
+            }
+          ]
+        },
+        {
+          "id": "r2",
+          "date": "2025-01-05",
+          "session": "a",
+          "role": "user",
+          "content": "澄山实验室的负责人是罗敏。",
+          "oracle_facts": [
+            {
+              "quote": "澄山实验室的负责人是罗敏。",
+              "subject": "澄山实验室",
+              "predicate": "负责人",
+              "value": "罗敏",
+              "kind": "other"
+            }
+          ]
+        },
+        {
+          "id": "r3",
+          "date": "2025-02-03",
+          "session": "b",
+          "role": "user",
+          "content": "沐桥实验室的负责人是何岚。",
+          "oracle_facts": [
+            {
+              "quote": "沐桥实验室的负责人是何岚。",
+              "subject": "沐桥实验室",
+              "predicate": "负责人",
+              "value": "何岚",
+              "kind": "other"
+            }
+          ]
+        },
+        {
+          "id": "r4",
+          "date": "2025-03-03",
+          "session": "c",
+          "role": "user",
+          "content": "我离开澄山实验室，正式加入沐桥实验室。",
+          "oracle_facts": [
+            {
+              "quote": "我离开澄山实验室，正式加入沐桥实验室。",
+              "subject": "self",
+              "predicate": "employer",
+              "value": "沐桥实验室",
+              "operation": "change",
+              "target_value": "澄山实验室",
+              "update_quote": "我离开澄山实验室，正式加入沐桥实验室。"
+            }
+          ]
+        },
+        {
+          "id": "r5",
+          "date": "2025-04-03",
+          "session": "d",
+          "role": "user",
+          "content": "我想要回澄山实验室任职，尚未作出决定。",
+          "oracle_facts": [
+            {
+              "quote": "我想要回澄山实验室任职，尚未作出决定。",
+              "subject": "self",
+              "predicate": "employer",
+              "value": "澄山实验室",
+              "modality": "planned"
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "leader",
+          "query": "截至2025-05-01，我所在工作单位的负责人是谁？",
+          "as_of": "2025-06-30",
+          "top_k": 1,
+          "gold": {
+            "answer": "何岚。",
+            "atoms": [
+              {
+                "claim": "当前单位为沐桥实验室",
+                "support": [
+                  {
+                    "source_id": "r4",
+                    "quote": "我离开澄山实验室，正式加入沐桥实验室。"
+                  }
+                ]
+              },
+              {
+                "claim": "沐桥负责人何岚",
+                "support": [
+                  {
+                    "source_id": "r3",
+                    "quote": "沐桥实验室的负责人是何岚。"
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "当前负责人罗敏"
+            ],
+            "reason": "必须连接r4与r3；r5只是愿望。",
+            "distractors": [
+              {
+                "source_id": "r1",
+                "risk": "旧单位"
+              },
+              {
+                "source_id": "r2",
+                "risk": "旧单位负责人"
+              },
+              {
+                "source_id": "r5",
+                "risk": "回任愿望尚未实现"
+              }
+            ]
+          }
+        },
+        {
+          "id": "leader_en",
+          "query": "Who leads my employer as of May 1, 2025?",
+          "as_of": "2025-06-30",
+          "top_k": 3,
+          "gold": {
+            "answer": "He Lan（何岚），负责人属于沐桥实验室。",
+            "atoms": [
+              {
+                "claim": "当前单位",
+                "support": [
+                  {
+                    "source_id": "r4",
+                    "quote": "我离开澄山实验室，正式加入沐桥实验室。"
+                  }
+                ]
+              },
+              {
+                "claim": "单位负责人",
+                "support": [
+                  {
+                    "source_id": "r3",
+                    "quote": "沐桥实验室的负责人是何岚。"
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "Luo Min",
+              "罗敏"
+            ],
+            "reason": "英文问题与中文消息指向相同证据链。",
+            "distractors": [
+              {
+                "source_id": "r1",
+                "risk": "旧单位"
+              },
+              {
+                "source_id": "r2",
+                "risk": "旧单位负责人"
+              },
+              {
+                "source_id": "r5",
+                "risk": "回任愿望尚未实现"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "missing_edge",
+      "split": "holdout",
+      "category": "B",
+      "sources": [
+        {
+          "id": "m1",
+          "date": "2025-03-02",
+          "session": "a",
+          "role": "user",
+          "content": "我目前在霜屿中心工作。",
+          "oracle_facts": [
+            {
+              "quote": "我目前在霜屿中心工作。",
+              "subject": "self",
+              "predicate": "employer",
+              "value": "霜屿中心"
+            }
+          ]
+        },
+        {
+          "id": "m2",
+          "date": "2025-03-04",
+          "session": "a",
+          "role": "user",
+          "content": "霜屿中心接待了来访者周芮。",
+          "oracle_facts": [
+            {
+              "quote": "霜屿中心接待了来访者周芮。",
+              "subject": "霜屿中心",
+              "predicate": "event",
+              "value": "周芮",
+              "kind": "event"
+            }
+          ]
+        },
+        {
+          "id": "m3",
+          "date": "2025-03-08",
+          "session": "b",
+          "role": "user",
+          "content": "来访者周芮的职位是南岑中心负责人。",
+          "oracle_facts": [
+            {
+              "quote": "来访者周芮的职位是南岑中心负责人。",
+              "subject": "周芮",
+              "predicate": "job_role",
+              "value": "南岑中心负责人"
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "missing",
+          "query": "我目前工作单位的负责人是谁？",
+          "as_of": "2025-06-30",
+          "top_k": 3,
+          "gold": {
+            "answer": "现有记录无法确定霜屿中心的负责人；周芮是来访者、南岑中心负责人。",
+            "atoms": [
+              {
+                "claim": "当前工作单位为霜屿中心",
+                "support": [
+                  {
+                    "source_id": "m1",
+                    "quote": "我目前在霜屿中心工作。"
+                  }
+                ]
+              },
+              {
+                "claim": "来访不等于负责人关系",
+                "support": [
+                  {
+                    "source_id": "m2",
+                    "quote": "霜屿中心接待了来访者周芮。"
+                  }
+                ]
+              },
+              {
+                "claim": "周芮职务属于另一中心",
+                "support": [
+                  {
+                    "source_id": "m3",
+                    "quote": "来访者周芮的职位是南岑中心负责人。"
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "霜屿中心负责人是周芮"
+            ],
+            "reason": "共现和反方向关系不能补齐缺边。",
+            "distractors": [
+              {
+                "source_id": "m2",
+                "risk": "来访共现不构成负责人关系"
+              },
+              {
+                "source_id": "m3",
+                "risk": "负责人职务属于另一中心"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "project_history",
+      "split": "development",
+      "category": "F1",
+      "sources": [
+        {
+          "id": "p1",
+          "date": "2025-01-02",
+          "session": "a",
+          "role": "user",
+          "content": "松塔项目启动时决定采用本地存储，原因是试点站点经常断网。",
+          "oracle_facts": [
+            {
+              "quote": "松塔项目启动时决定采用本地存储，原因是试点站点经常断网。",
+              "subject": "松塔项目",
+              "predicate": "event",
+              "value": "采用本地存储",
+              "kind": "decision",
+              "scope": "松塔项目"
+            }
+          ]
+        },
+        {
+          "id": "p2",
+          "date": "2025-01-04",
+          "session": "a",
+          "role": "user",
+          "content": "松塔项目的规则是原始记录保留三十天；安全事故记录必须保留一年。",
+          "oracle_facts": [
+            {
+              "quote": "松塔项目的规则是原始记录保留三十天；安全事故记录必须保留一年。",
+              "subject": "松塔项目",
+              "predicate": "rules",
+              "value": "原始记录保留三十天；安全事故记录必须保留一年",
+              "kind": "rule",
+              "scope": "松塔项目"
+            }
+          ]
+        },
+        {
+          "id": "p3",
+          "date": "2025-02-01",
+          "session": "pilot",
+          "role": "user",
+          "content": "松塔项目进入小范围试点阶段。",
+          "oracle_facts": [
+            {
+              "quote": "松塔项目进入小范围试点阶段。",
+              "subject": "松塔项目",
+              "predicate": "project_status",
+              "value": "小范围试点阶段",
+              "scope": "松塔项目"
+            }
+          ]
+        },
+        {
+          "id": "p4",
+          "date": "2025-02-05",
+          "session": "pilot",
+          "role": "user",
+          "content": "松塔项目试点发现导出文件缺少时区标记。",
+          "oracle_facts": [
+            {
+              "quote": "松塔项目试点发现导出文件缺少时区标记。",
+              "subject": "松塔项目",
+              "predicate": "event",
+              "value": "导出文件缺少时区标记",
+              "kind": "event",
+              "scope": "松塔项目"
+            }
+          ]
+        },
+        {
+          "id": "p5",
+          "date": "2025-02-10",
+          "session": "pilot",
+          "role": "user",
+          "content": "松塔项目决定在导出文件中增加时区标记。",
+          "oracle_facts": [
+            {
+              "quote": "松塔项目决定在导出文件中增加时区标记。",
+              "subject": "松塔项目",
+              "predicate": "event",
+              "value": "增加时区标记",
+              "kind": "decision",
+              "scope": "松塔项目"
+            }
+          ]
+        },
+        {
+          "id": "p6",
+          "date": "2025-03-01",
+          "session": "accept",
+          "role": "user",
+          "content": "松塔项目目前进入验收阶段。",
+          "oracle_facts": [
+            {
+              "quote": "松塔项目目前进入验收阶段。",
+              "subject": "松塔项目",
+              "predicate": "project_status",
+              "value": "验收阶段",
+              "scope": "松塔项目"
+            }
+          ]
+        },
+        {
+          "id": "p7",
+          "date": "2025-03-03",
+          "session": "accept",
+          "role": "user",
+          "content": "松塔项目目前处于验收阶段。",
+          "oracle_facts": [
+            {
+              "quote": "松塔项目目前处于验收阶段。",
+              "subject": "松塔项目",
+              "predicate": "project_status",
+              "value": "验收阶段",
+              "scope": "松塔项目"
+            }
+          ]
+        },
+        {
+          "id": "p8",
+          "date": "2025-03-06",
+          "session": "accept",
+          "role": "user",
+          "content": "松塔项目仍处于验收阶段。",
+          "oracle_facts": [
+            {
+              "quote": "松塔项目仍处于验收阶段。",
+              "subject": "松塔项目",
+              "predicate": "project_status",
+              "value": "验收阶段",
+              "scope": "松塔项目"
+            }
+          ]
+        },
+        {
+          "id": "p9",
+          "date": "2025-03-09",
+          "session": "accept",
+          "role": "user",
+          "content": "松塔项目验收仍在进行。",
+          "oracle_facts": [
+            {
+              "quote": "松塔项目验收仍在进行。",
+              "subject": "松塔项目",
+              "predicate": "project_status",
+              "value": "验收仍在进行",
+              "scope": "松塔项目"
+            }
+          ]
+        },
+        {
+          "id": "p10",
+          "date": "2025-03-12",
+          "session": "accept",
+          "role": "user",
+          "content": "松塔项目的跨设备去重问题仍未解决。",
+          "oracle_facts": [
+            {
+              "quote": "松塔项目的跨设备去重问题仍未解决。",
+              "subject": "松塔项目",
+              "predicate": "event",
+              "value": "跨设备去重问题仍未解决",
+              "kind": "event",
+              "scope": "松塔项目"
+            }
+          ]
+        },
+        {
+          "id": "p11",
+          "date": "2025-03-15",
+          "session": "accept",
+          "role": "user",
+          "content": "松塔项目计划四月扩大试点，审批尚未完成。",
+          "oracle_facts": [
+            {
+              "quote": "松塔项目计划四月扩大试点，审批尚未完成。",
+              "subject": "松塔项目",
+              "predicate": "event",
+              "value": "四月扩大试点",
+              "kind": "event",
+              "scope": "松塔项目",
+              "modality": "planned"
+            }
+          ]
+        },
+        {
+          "id": "p12",
+          "date": "2025-03-16",
+          "session": "other",
+          "role": "user",
+          "content": "灯舟项目已经完成全国部署。",
+          "oracle_facts": [
+            {
+              "quote": "灯舟项目已经完成全国部署。",
+              "subject": "灯舟项目",
+              "predicate": "project_status",
+              "value": "完成全国部署",
+              "scope": "灯舟项目"
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "overview",
+          "query": "请总结松塔项目从启动至今的关键阶段、决定、规则例外及未解决事项。",
+          "as_of": "2025-06-30",
+          "top_k": 3,
+          "gold": {
+            "answer": "本地存储应对断网；试点后进入验收；补充导出时区；原始记录三十天、事故记录一年；去重未解决；四月扩试尚待审批。",
+            "atoms": [
+              {
+                "claim": "早期本地存储决定及断网原因",
+                "support": [
+                  {
+                    "source_id": "p1",
+                    "quote": "松塔项目启动时决定采用本地存储，原因是试点站点经常断网。"
+                  }
+                ]
+              },
+              {
+                "claim": "保留规则及事故例外",
+                "support": [
+                  {
+                    "source_id": "p2",
+                    "quote": "松塔项目的规则是原始记录保留三十天；安全事故记录必须保留一年。"
+                  }
+                ]
+              },
+              {
+                "claim": "试点阶段",
+                "support": [
+                  {
+                    "source_id": "p3",
+                    "quote": "松塔项目进入小范围试点阶段。"
+                  }
+                ]
+              },
+              {
+                "claim": "导出时区问题及决定",
+                "support": [
+                  {
+                    "source_id": "p4",
+                    "quote": "松塔项目试点发现导出文件缺少时区标记。"
+                  },
+                  {
+                    "source_id": "p5",
+                    "quote": "松塔项目决定在导出文件中增加时区标记。"
+                  }
+                ]
+              },
+              {
+                "claim": "验收阶段",
+                "support": [
+                  {
+                    "source_id": "p6",
+                    "quote": "松塔项目目前进入验收阶段。"
+                  }
+                ],
+                "support_alternatives": [
+                  [
+                    {
+                      "source_id": "p7",
+                      "quote": "松塔项目目前处于验收阶段。"
+                    }
+                  ],
+                  [
+                    {
+                      "source_id": "p8",
+                      "quote": "松塔项目仍处于验收阶段。"
+                    }
+                  ],
+                  [
+                    {
+                      "source_id": "p9",
+                      "quote": "松塔项目验收仍在进行。"
+                    }
+                  ]
+                ]
+              },
+              {
+                "claim": "未解决去重",
+                "support": [
+                  {
+                    "source_id": "p10",
+                    "quote": "松塔项目的跨设备去重问题仍未解决。"
+                  }
+                ]
+              },
+              {
+                "claim": "四月扩试仍是待批计划",
+                "support": [
+                  {
+                    "source_id": "p11",
+                    "quote": "松塔项目计划四月扩大试点，审批尚未完成。"
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "松塔已全国部署",
+              "扩试已获批准"
+            ],
+            "reason": "重复验收消息不能挤掉早期低频决定、规则例外和未解决问题；灯舟属于另一项目。",
+            "distractors": [
+              {
+                "source_id": "p12",
+                "risk": "属于另一个项目"
+              }
+            ]
+          }
+        },
+        {
+          "id": "small_overview",
+          "query": "请用一段话概览松塔项目的关键决定、规则例外和剩余问题。",
+          "as_of": "2025-06-30",
+          "top_k": 1,
+          "gold": {
+            "answer": "本地存储应对断网，导出增加时区；事故记录保留一年；跨设备去重未解决，扩试待审批。",
+            "atoms": [
+              {
+                "claim": "早期本地存储决定及断网原因",
+                "support": [
+                  {
+                    "source_id": "p1",
+                    "quote": "松塔项目启动时决定采用本地存储，原因是试点站点经常断网。"
+                  }
+                ]
+              },
+              {
+                "claim": "保留规则及事故例外",
+                "support": [
+                  {
+                    "source_id": "p2",
+                    "quote": "松塔项目的规则是原始记录保留三十天；安全事故记录必须保留一年。"
+                  }
+                ]
+              },
+              {
+                "claim": "导出时区问题及决定",
+                "support": [
+                  {
+                    "source_id": "p4",
+                    "quote": "松塔项目试点发现导出文件缺少时区标记。"
+                  },
+                  {
+                    "source_id": "p5",
+                    "quote": "松塔项目决定在导出文件中增加时区标记。"
+                  }
+                ]
+              },
+              {
+                "claim": "未解决去重",
+                "support": [
+                  {
+                    "source_id": "p10",
+                    "quote": "松塔项目的跨设备去重问题仍未解决。"
+                  }
+                ]
+              },
+              {
+                "claim": "四月扩试仍是待批计划",
+                "support": [
+                  {
+                    "source_id": "p11",
+                    "quote": "松塔项目计划四月扩大试点，审批尚未完成。"
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "松塔已全国部署",
+              "去重已解决"
+            ],
+            "reason": "top_k=1时仍按同一实际内容预算比较覆盖能力。",
+            "distractors": [
+              {
+                "source_id": "p12",
+                "risk": "属于另一个项目"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "field_trial",
+      "split": "holdout",
+      "category": "F1",
+      "sources": [
+        {
+          "id": "f1",
+          "date": "2025-01-15",
+          "session": "a",
+          "role": "user",
+          "content": "芦湾试验决定先校准传感器，再采集正式数据。",
+          "oracle_facts": [
+            {
+              "quote": "芦湾试验决定先校准传感器，再采集正式数据。",
+              "subject": "芦湾试验",
+              "predicate": "event",
+              "value": "先校准传感器，再采集正式数据",
+              "kind": "decision",
+              "scope": "芦湾试验"
+            }
+          ]
+        },
+        {
+          "id": "f2",
+          "date": "2025-02-12",
+          "session": "b",
+          "role": "user",
+          "content": "芦湾试验完成传感器校准。",
+          "oracle_facts": [
+            {
+              "quote": "芦湾试验完成传感器校准。",
+              "subject": "芦湾试验",
+              "predicate": "event",
+              "value": "完成传感器校准",
+              "kind": "event",
+              "scope": "芦湾试验"
+            }
+          ]
+        },
+        {
+          "id": "f3",
+          "date": "2025-03-12",
+          "session": "c",
+          "role": "user",
+          "content": "芦湾试验开始正式数据采集。",
+          "oracle_facts": [
+            {
+              "quote": "芦湾试验开始正式数据采集。",
+              "subject": "芦湾试验",
+              "predicate": "event",
+              "value": "开始正式数据采集",
+              "kind": "event",
+              "scope": "芦湾试验"
+            }
+          ]
+        },
+        {
+          "id": "f4",
+          "date": "2025-03-15",
+          "session": "c",
+          "role": "user",
+          "content": "芦湾试验的规则是剔除雨天数据，室内对照组除外。",
+          "oracle_facts": [
+            {
+              "quote": "芦湾试验的规则是剔除雨天数据，室内对照组除外。",
+              "subject": "芦湾试验",
+              "predicate": "rules",
+              "value": "剔除雨天数据，室内对照组除外",
+              "kind": "rule",
+              "scope": "芦湾试验"
+            }
+          ]
+        },
+        {
+          "id": "f5",
+          "date": "2025-04-01",
+          "session": "d",
+          "role": "user",
+          "content": "芦湾试验目前处于数据复核阶段。",
+          "oracle_facts": [
+            {
+              "quote": "芦湾试验目前处于数据复核阶段。",
+              "subject": "芦湾试验",
+              "predicate": "project_status",
+              "value": "数据复核阶段",
+              "scope": "芦湾试验"
+            }
+          ]
+        },
+        {
+          "id": "f6",
+          "date": "2025-04-03",
+          "session": "d",
+          "role": "user",
+          "content": "芦湾试验的第三批设备编号仍待核对。",
+          "oracle_facts": [
+            {
+              "quote": "芦湾试验的第三批设备编号仍待核对。",
+              "subject": "芦湾试验",
+              "predicate": "event",
+              "value": "第三批设备编号仍待核对",
+              "kind": "event",
+              "scope": "芦湾试验"
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "stages",
+          "query": "请梳理芦湾试验的阶段顺序、数据规则与当前待办。",
+          "as_of": "2025-06-30",
+          "top_k": 3,
+          "gold": {
+            "answer": "先校准，后正式采集，再数据复核；雨天数据剔除但室内对照组例外；第三批设备编号待核对。",
+            "atoms": [
+              {
+                "claim": "校准先于采集",
+                "support": [
+                  {
+                    "source_id": "f1",
+                    "quote": "芦湾试验决定先校准传感器，再采集正式数据。"
+                  }
+                ]
+              },
+              {
+                "claim": "当前阶段复核",
+                "support": [
+                  {
+                    "source_id": "f5",
+                    "quote": "芦湾试验目前处于数据复核阶段。"
+                  }
+                ]
+              },
+              {
+                "claim": "雨天规则与例外",
+                "support": [
+                  {
+                    "source_id": "f4",
+                    "quote": "芦湾试验的规则是剔除雨天数据，室内对照组除外。"
+                  }
+                ]
+              },
+              {
+                "claim": "未完成待办",
+                "support": [
+                  {
+                    "source_id": "f6",
+                    "quote": "芦湾试验的第三批设备编号仍待核对。"
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "所有雨天数据一律剔除",
+              "设备编号核对完成"
+            ],
+            "reason": "总结必须跨阶段且保留例外，不能将待办写成完成。",
+            "distractors": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "preferences",
+      "split": "holdout",
+      "category": "E/control",
+      "sources": [
+        {
+          "id": "e1",
+          "date": "2025-02-01",
+          "session": "a",
+          "role": "user",
+          "content": "我喜欢无糖豆浆。",
+          "oracle_facts": [
+            {
+              "quote": "我喜欢无糖豆浆。",
+              "subject": "self",
+              "predicate": "preference",
+              "value": "无糖豆浆",
+              "kind": "preference"
+            }
+          ]
+        },
+        {
+          "id": "e2",
+          "date": "2025-03-01",
+          "session": "b",
+          "role": "user",
+          "content": "我也喜欢热红茶。",
+          "oracle_facts": [
+            {
+              "quote": "我也喜欢热红茶。",
+              "subject": "self",
+              "predicate": "preference",
+              "value": "热红茶",
+              "kind": "preference",
+              "operation": "add"
+            }
+          ]
+        },
+        {
+          "id": "e3",
+          "date": "2025-03-02",
+          "session": "b",
+          "role": "user",
+          "content": "同事许遥喜欢加糖咖啡。",
+          "oracle_facts": [
+            {
+              "quote": "同事许遥喜欢加糖咖啡。",
+              "subject": "许遥",
+              "predicate": "preference",
+              "value": "加糖咖啡",
+              "kind": "preference"
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "both",
+          "query": "我有哪些饮品偏好？",
+          "as_of": "2025-06-30",
+          "top_k": 3,
+          "gold": {
+            "answer": "无糖豆浆和热红茶。",
+            "atoms": [
+              {
+                "claim": "豆浆",
+                "support": [
+                  {
+                    "source_id": "e1",
+                    "quote": "我喜欢无糖豆浆。"
+                  }
+                ]
+              },
+              {
+                "claim": "红茶",
+                "support": [
+                  {
+                    "source_id": "e2",
+                    "quote": "我也喜欢热红茶。"
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "我喜欢加糖咖啡"
+            ],
+            "reason": "多值补充不能覆盖旧偏好，同事偏好不能归给我。",
+            "distractors": [
+              {
+                "source_id": "e3",
+                "risk": "同事偏好不能归给用户"
+              }
+            ]
+          }
+        },
+        {
+          "id": "fact",
+          "query": "同事许遥喜欢喝什么？",
+          "as_of": "2025-06-30",
+          "top_k": 3,
+          "gold": {
+            "answer": "加糖咖啡。",
+            "atoms": [
+              {
+                "claim": "许遥的偏好",
+                "support": [
+                  {
+                    "source_id": "e3",
+                    "quote": "同事许遥喜欢加糖咖啡。"
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "许遥喜欢无糖豆浆"
+            ],
+            "reason": "普通归因控制题。",
+            "distractors": [
+              {
+                "source_id": "e1",
+                "risk": "用户偏好不能归给同事"
+              },
+              {
+                "source_id": "e2",
+                "risk": "用户偏好不能归给同事"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "policy",
+      "split": "development",
+      "category": "G/control",
+      "sources": [
+        {
+          "id": "g1",
+          "date": "2025-04-01",
+          "session": "a",
+          "role": "user",
+          "content": "团队规则：金额超过五百元的采购需要主管审批；应急医疗采购允许先购买后补批。",
+          "oracle_facts": [
+            {
+              "quote": "团队规则：金额超过五百元的采购需要主管审批；应急医疗采购允许先购买后补批。",
+              "subject": "团队",
+              "predicate": "rules",
+              "value": "金额超过五百元的采购需要主管审批；应急医疗采购允许先购买后补批",
+              "kind": "rule"
+            }
+          ]
+        },
+        {
+          "id": "g2",
+          "date": "2025-04-02",
+          "session": "a",
+          "role": "user",
+          "content": "昨天买了一批六百元的应急医疗用品。",
+          "oracle_facts": [
+            {
+              "quote": "昨天买了一批六百元的应急医疗用品。",
+              "subject": "self",
+              "predicate": "event",
+              "value": "六百元的应急医疗用品",
+              "kind": "event"
+            }
+          ]
+        },
+        {
+          "id": "g3",
+          "date": "2025-04-03",
+          "session": "a",
+          "role": "user",
+          "content": "今天计划采购八百元的普通办公用品。",
+          "oracle_facts": [
+            {
+              "quote": "今天计划采购八百元的普通办公用品。",
+              "subject": "self",
+              "predicate": "event",
+              "value": "八百元的普通办公用品",
+              "kind": "event",
+              "modality": "planned"
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "exception",
+          "query": "六百元的应急医疗用品是否必须先审批再购买？",
+          "as_of": "2025-06-30",
+          "top_k": 3,
+          "gold": {
+            "answer": "不必先审批，可以先购买后补批。",
+            "atoms": [
+              {
+                "claim": "适用例外",
+                "support": [
+                  {
+                    "source_id": "g1",
+                    "quote": "应急医疗采购允许先购买后补批。"
+                  }
+                ]
+              },
+              {
+                "claim": "采购类型金额",
+                "support": [
+                  {
+                    "source_id": "g2",
+                    "quote": "昨天买了一批六百元的应急医疗用品。"
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "无需任何审批"
+            ],
+            "reason": "具体例外优先，仍有补批要求。",
+            "distractors": [
+              {
+                "source_id": "g3",
+                "risk": "另一笔采购"
+              }
+            ]
+          }
+        },
+        {
+          "id": "normal",
+          "query": "八百元普通办公用品可以先买后批吗？",
+          "as_of": "2025-06-30",
+          "top_k": 3,
+          "gold": {
+            "answer": "记录没有适用例外，需要先取得主管审批。",
+            "atoms": [
+              {
+                "claim": "一般规则",
+                "support": [
+                  {
+                    "source_id": "g1",
+                    "quote": "金额超过五百元的采购需要主管审批"
+                  }
+                ]
+              },
+              {
+                "claim": "普通办公计划",
+                "support": [
+                  {
+                    "source_id": "g3",
+                    "quote": "今天计划采购八百元的普通办公用品。"
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "可以先买后批"
+            ],
+            "reason": "普通办公不属于应急医疗。",
+            "distractors": [
+              {
+                "source_id": "g2",
+                "risk": "应急例外不适用于普通办公"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "experiments",
+      "split": "holdout",
+      "category": "G4/control",
+      "sources": [
+        {
+          "id": "x1",
+          "date": "2025-05-01",
+          "session": "a",
+          "role": "user",
+          "content": "我记录的试验结果：并发数2时，吞吐量为每秒18次，失败率为0%。",
+          "oracle_facts": [
+            {
+              "quote": "我记录的试验结果：并发数2时，吞吐量为每秒18次，失败率为0%。",
+              "subject": "self",
+              "predicate": "event",
+              "value": "并发数2时，吞吐量为每秒18次，失败率为0%",
+              "kind": "event"
+            }
+          ]
+        },
+        {
+          "id": "x2",
+          "date": "2025-05-02",
+          "session": "a",
+          "role": "user",
+          "content": "我记录的试验结果：并发数4时，吞吐量为每秒31次，失败率为1%。",
+          "oracle_facts": [
+            {
+              "quote": "我记录的试验结果：并发数4时，吞吐量为每秒31次，失败率为1%。",
+              "subject": "self",
+              "predicate": "event",
+              "value": "并发数4时，吞吐量为每秒31次，失败率为1%",
+              "kind": "event"
+            }
+          ]
+        },
+        {
+          "id": "x3",
+          "date": "2025-05-03",
+          "session": "a",
+          "role": "user",
+          "content": "我记录的试验结果：并发数8时，吞吐量为每秒35次，失败率为9%。",
+          "oracle_facts": [
+            {
+              "quote": "我记录的试验结果：并发数8时，吞吐量为每秒35次，失败率为9%。",
+              "subject": "self",
+              "predicate": "event",
+              "value": "并发数8时，吞吐量为每秒35次，失败率为9%",
+              "kind": "event"
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "constrained",
+          "query": "在这些已测试配置中，要求失败率不超过1%，吞吐量最高的是哪个并发数？",
+          "as_of": "2025-06-30",
+          "top_k": 3,
+          "gold": {
+            "answer": "并发数4：每秒31次、失败率1%。",
+            "atoms": [
+              {
+                "claim": "并发2结果",
+                "support": [
+                  {
+                    "source_id": "x1",
+                    "quote": "并发数2时，吞吐量为每秒18次，失败率为0%"
+                  }
+                ]
+              },
+              {
+                "claim": "并发4结果",
+                "support": [
+                  {
+                    "source_id": "x2",
+                    "quote": "并发数4时，吞吐量为每秒31次，失败率为1%"
+                  }
+                ]
+              },
+              {
+                "claim": "并发8不合格",
+                "support": [
+                  {
+                    "source_id": "x3",
+                    "quote": "并发数8时，吞吐量为每秒35次，失败率为9%"
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "并发数8最合适"
+            ],
+            "reason": "先按失败率筛选，再在合格配置中比较吞吐量。",
+            "distractors": [
+              {
+                "source_id": "x3",
+                "risk": "吞吐量高但失败率不满足条件"
+              }
+            ]
+          }
+        },
+        {
+          "id": "unobserved",
+          "query": "并发数6时的准确吞吐量是多少？",
+          "as_of": "2025-06-30",
+          "top_k": 3,
+          "gold": {
+            "answer": "没有测试记录，无法给出准确吞吐量。",
+            "atoms": [
+              {
+                "claim": "已测配置只有2/4/8",
+                "support": [
+                  {
+                    "source_id": "x1",
+                    "quote": "并发数2时"
+                  },
+                  {
+                    "source_id": "x2",
+                    "quote": "并发数4时"
+                  },
+                  {
+                    "source_id": "x3",
+                    "quote": "并发数8时"
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "并发6准确吞吐量33"
+            ],
+            "reason": "不能将插值或猜测表述为实测。",
+            "distractors": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "time_sequence",
+      "split": "development",
+      "category": "C/control",
+      "sources": [
+        {
+          "id": "t1",
+          "date": "2025-01-12",
+          "session": "a",
+          "role": "user",
+          "content": "我在2025-01-10提交了申请。",
+          "oracle_facts": [
+            {
+              "quote": "我在2025-01-10提交了申请。",
+              "subject": "self",
+              "predicate": "event",
+              "value": "提交了申请",
+              "kind": "event",
+              "valid_from": "2025-01-10",
+              "time_quote": "我在2025-01-10提交了申请。"
+            }
+          ]
+        },
+        {
+          "id": "t2",
+          "date": "2025-02-10",
+          "session": "b",
+          "role": "user",
+          "content": "我在2025-01-25完成了面试。",
+          "oracle_facts": [
+            {
+              "quote": "我在2025-01-25完成了面试。",
+              "subject": "self",
+              "predicate": "event",
+              "value": "完成了面试",
+              "kind": "event",
+              "valid_from": "2025-01-25",
+              "time_quote": "我在2025-01-25完成了面试。"
+            }
+          ]
+        },
+        {
+          "id": "t3",
+          "date": "2025-02-02",
+          "session": "c",
+          "role": "user",
+          "content": "我在2025-02-01收到录用通知。",
+          "oracle_facts": [
+            {
+              "quote": "我在2025-02-01收到录用通知。",
+              "subject": "self",
+              "predicate": "event",
+              "value": "收到录用通知",
+              "kind": "event",
+              "valid_from": "2025-02-01",
+              "time_quote": "我在2025-02-01收到录用通知。"
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "interval",
+          "query": "从提交申请到完成面试，相隔多少天？",
+          "as_of": "2025-06-30",
+          "top_k": 3,
+          "gold": {
+            "answer": "15天。",
+            "atoms": [
+              {
+                "claim": "申请日期",
+                "support": [
+                  {
+                    "source_id": "t1",
+                    "quote": "我在2025-01-10提交了申请。"
+                  }
+                ]
+              },
+              {
+                "claim": "面试日期",
+                "support": [
+                  {
+                    "source_id": "t2",
+                    "quote": "我在2025-01-25完成了面试。"
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "相隔29天"
+            ],
+            "reason": "依据事件日期计算，不使用入库顺序或消息日期。",
+            "distractors": [
+              {
+                "source_id": "t2",
+                "risk": "消息记录较晚不代表面试事件较晚"
+              }
+            ]
+          }
+        },
+        {
+          "id": "order",
+          "query": "按实际发生时间排列提交申请、完成面试和收到录用通知。",
+          "as_of": "2025-06-30",
+          "top_k": 3,
+          "gold": {
+            "answer": "1月10日申请、1月25日面试、2月1日收到通知。",
+            "atoms": [
+              {
+                "claim": "申请",
+                "support": [
+                  {
+                    "source_id": "t1",
+                    "quote": "我在2025-01-10提交了申请。"
+                  }
+                ]
+              },
+              {
+                "claim": "面试",
+                "support": [
+                  {
+                    "source_id": "t2",
+                    "quote": "我在2025-01-25完成了面试。"
+                  }
+                ]
+              },
+              {
+                "claim": "录用",
+                "support": [
+                  {
+                    "source_id": "t3",
+                    "quote": "我在2025-02-01收到录用通知。"
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "录用先于面试"
+            ],
+            "reason": "面试消息迟到不改变实际事件顺序。",
+            "distractors": [
+              {
+                "source_id": "t2",
+                "risk": "消息记录较晚不代表面试事件较晚"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "identity",
+      "split": "holdout",
+      "category": "A/D1",
+      "sources": [
+        {
+          "id": "i1",
+          "date": "2025-01-04",
+          "session": "a",
+          "role": "user",
+          "content": "研发组的顾宁目前住在武汉。",
+          "oracle_facts": [
+            {
+              "quote": "研发组的顾宁目前住在武汉。",
+              "subject": "顾宁",
+              "predicate": "residence",
+              "value": "武汉",
+              "identity_context": "研发组"
+            }
+          ]
+        },
+        {
+          "id": "i2",
+          "date": "2025-02-04",
+          "session": "b",
+          "role": "user",
+          "content": "市场组的顾宁目前住在成都。",
+          "oracle_facts": [
+            {
+              "quote": "市场组的顾宁目前住在成都。",
+              "subject": "顾宁",
+              "predicate": "residence",
+              "value": "成都",
+              "identity_context": "市场组"
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "ambiguous",
+          "query": "顾宁目前住在哪里？",
+          "as_of": "2025-06-30",
+          "top_k": 3,
+          "gold": {
+            "answer": "需确认是研发组还是市场组：前者武汉，后者成都。",
+            "atoms": [
+              {
+                "claim": "研发组顾宁",
+                "support": [
+                  {
+                    "source_id": "i1",
+                    "quote": "研发组的顾宁目前住在武汉。"
+                  }
+                ]
+              },
+              {
+                "claim": "市场组顾宁",
+                "support": [
+                  {
+                    "source_id": "i2",
+                    "quote": "市场组的顾宁目前住在成都。"
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "顾宁已从武汉搬到成都"
+            ],
+            "reason": "同名且身份不同，不能最后写入获胜。",
+            "distractors": [
+              {
+                "source_id": "i2",
+                "risk": "同名不同身份不得覆盖研发组记录"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "annotation_notes": [
+    "Gold preflight review: current-address answer needs the latest confirmed observation; unrealized plans are distractors, not mandatory answer content.",
+    "Repeated acceptance-stage observations are alternative evidence, not separately required facts. These corrections preceded real evaluation; no application code was tuned."
+  ]
+}

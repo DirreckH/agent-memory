@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import replace
 import re
 
 from app.governance.models import Fact, StateResolution, UserSnapshot, VersionRelation
@@ -83,6 +84,38 @@ def derive_relations(facts: tuple[Fact, ...]) -> tuple[VersionRelation, ...]:
 
 
 class StateResolver:
+    @staticmethod
+    def knowledge_view(snapshot, cutoff):
+        """知识截止限制消息可见性；它与事件/有效时间不是同一条轴。"""
+        if cutoff is None:
+            return snapshot
+        visible = {sid for sid,s in snapshot.sources.items() if s.timestamp is not None and s.timestamp <= cutoff}
+        facts = tuple(f for f in snapshot.facts if all(e.source_id in visible for e in f.evidence))
+        ids = {f.id for f in facts}
+        return replace(snapshot, sources={k:v for k,v in snapshot.sources.items() if k in visible}, facts=facts,
+                       relations=tuple(r for r in snapshot.relations if r.newer in ids and r.older in ids),
+                       statuses=tuple(s for s in snapshot.statuses if s.source_id in visible),
+                       summaries=(), records=tuple(r for r in snapshot.records if r.id in visible))
+
+    def state_at(self, snapshot, slots=None, reference=None, *, knowledge_cutoff=None):
+        return self.resolve(self.knowledge_view(snapshot, knowledge_cutoff), slots, 'current', reference)
+
+    def history_until(self, snapshot, slots=None, reference=None, *, knowledge_cutoff=None):
+        return self.resolve(self.knowledge_view(snapshot, knowledge_cutoff), slots, 'history', reference)
+
+    def events_between(self, snapshot, slots=None, window=None, *, knowledge_cutoff=None):
+        result = self.history_until(snapshot, slots, knowledge_cutoff=knowledge_cutoff)
+        if window is None:
+            return result
+        excluded = dict(result.excluded)
+        selected = []
+        for fact in result.selected:
+            if fact.observation_time is not None and not window.contains(fact.observation_time):
+                excluded[fact.id] = 'outside_event_window'
+            else:
+                selected.append(fact)
+        return replace(result, selected=tuple(selected), excluded=excluded)
+
     def resolve(self, snapshot: UserSnapshot, slots=None, intent="current", reference=None) -> StateResolution:
         considered = {f.id: f for f in snapshot.facts if slots is None or f.slot in slots}
         excluded, updates, unresolved = {}, [], []
@@ -113,6 +146,9 @@ class StateResolver:
         for fact in considered.values():
             all_slots.add(fact.slot)
             if fact.id in excluded:
+                continue
+            if reference is not None and fact.observation_time is not None and fact.observation_time > reference:
+                excluded[fact.id] = 'not_yet_effective' if fact.valid_from is not None else 'after_reference'
                 continue
             if fact.modality != "asserted" or fact.polarity != "positive" or fact.operation == "retract":
                 excluded[fact.id] = "not_confirmed_state"

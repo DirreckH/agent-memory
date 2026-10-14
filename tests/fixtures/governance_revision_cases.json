@@ -1,0 +1,161 @@
+{
+  "description": "人工预先声明的虚构数据；gold 不由待测规划器或解析器生成。",
+  "sources": [
+    {
+      "id": "M1",
+      "content": "我现在在星河公司工作，星河公司的负责人是林峰。",
+      "timestamp": 1736467200000,
+      "facts": [
+        {
+          "subject": "self",
+          "predicate": "employer",
+          "scope": "work",
+          "value": "星河公司",
+          "quote": "我现在在星河公司工作"
+        },
+        {
+          "subject": "星河公司",
+          "predicate": "负责人",
+          "value": "林峰",
+          "quote": "星河公司的负责人是林峰。",
+          "kind": "other"
+        }
+      ]
+    },
+    {
+      "id": "M2",
+      "content": "青禾公司目前的负责人是陈宁。",
+      "timestamp": 1738368000000,
+      "facts": [
+        {
+          "subject": "青禾公司",
+          "predicate": "负责人",
+          "value": "陈宁",
+          "quote": "青禾公司目前的负责人是陈宁。",
+          "kind": "other"
+        }
+      ]
+    },
+    {
+      "id": "M3",
+      "content": "我今天从星河公司离职，正式入职青禾公司。",
+      "timestamp": 1740787200000,
+      "facts": [
+        {
+          "subject": "self",
+          "predicate": "employer",
+          "scope": "work",
+          "value": "青禾公司",
+          "quote": "我今天从星河公司离职，正式入职青禾公司。",
+          "operation": "change",
+          "target_value": "星河公司",
+          "update_quote": "我今天从星河公司离职，正式入职青禾公司。",
+          "object_entities": [
+            "星河公司",
+            "青禾公司"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "M4",
+      "content": "我打算下个月回星河公司，但目前还没有确定，也没有办理入职。",
+      "timestamp": 1741564800000,
+      "facts": [
+        {
+          "subject": "self",
+          "predicate": "employer",
+          "scope": "work",
+          "value": "星河公司",
+          "quote": "我打算下个月回星河公司，但目前还没有确定，也没有办理入职。",
+          "modality": "planned",
+          "polarity": "negative"
+        }
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "id": "company_zh",
+      "query": "截至 2025 年 3 月 15 日，我所在公司的负责人是谁？",
+      "top_k": 3,
+      "answer": "陈宁",
+      "required_sources": [
+        "M3",
+        "M2"
+      ],
+      "forbidden_current": [
+        "林峰"
+      ],
+      "reason": "M3 确立任职青禾；M2 提供负责人；M4 只是未实现计划。"
+    },
+    {
+      "id": "company_iso",
+      "query": "截至 2025-03-15，我所在公司的负责人是谁？",
+      "top_k": 3,
+      "answer": "陈宁",
+      "required_sources": [
+        "M3",
+        "M2"
+      ],
+      "forbidden_current": [
+        "林峰"
+      ],
+      "reason": "日期写法不应改变状态与关系语义。"
+    },
+    {
+      "id": "company_en",
+      "query": "Who leads my employer as of March 15, 2025?",
+      "top_k": 3,
+      "answer": "陈宁",
+      "required_sources": [
+        "M3",
+        "M2"
+      ],
+      "forbidden_current": [
+        "林峰"
+      ],
+      "reason": "英文日期与中文原文支持同一个时点和证据链。"
+    },
+    {
+      "id": "company_one",
+      "query": "截至 2025-03-15，我所在公司的负责人是谁？",
+      "top_k": 1,
+      "answer": "陈宁",
+      "required_sources": [
+        "M3",
+        "M2"
+      ],
+      "forbidden_current": [
+        "林峰"
+      ],
+      "reason": "一条结果可组成完整证据组，实际可见 token 预算仍与对照相同。"
+    },
+    {
+      "id": "employer",
+      "query": "我目前的工作单位是哪里？",
+      "top_k": 3,
+      "answer": "青禾公司",
+      "required_sources": [
+        "M3"
+      ],
+      "forbidden_current": [
+        "林峰"
+      ],
+      "reason": "计划不得替代已确认状态。"
+    },
+    {
+      "id": "history",
+      "query": "总结我的任职变化和未来计划。",
+      "top_k": 3,
+      "answer": "从星河公司转到青禾公司；计划回星河但尚未实现。",
+      "required_sources": [
+        "M1",
+        "M3",
+        "M4"
+      ],
+      "forbidden_current": [],
+      "reason": "综合问题同时需要真实历史、当前状态及计划性质。"
+    }
+  ]
+}

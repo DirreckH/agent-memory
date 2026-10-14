@@ -11,6 +11,7 @@ from app.governance.resolution import StateResolver
 
 
 SECTIONS = ("current", "history", "events", "plans", "conflicts")
+BUILD_VERSION = 'extractive-v2'
 LABELS = {"current": "当前状态", "history": "历史变化", "events": "事件与决定",
           "plans": "计划", "conflicts": "冲突与纠正", "directory": "来源目录"}
 
@@ -43,7 +44,7 @@ class SummaryBuilder:
             return SummarySnapshot(snapshot.generation, snapshot.revision, (), False)
         if self.versions:
             current = StateResolver().resolve(snapshot, intent="current", reference=reference)
-            history = StateResolver().resolve(snapshot, intent="history")
+            history = StateResolver().history_until(snapshot, reference=reference)
         else:
             current = history = StateResolution(snapshot.facts, {}, (), (), snapshot.incomplete)
         selected = {f.id for f in current.selected} if self.versions else {f.id for f in snapshot.facts}
@@ -55,6 +56,10 @@ class SummaryBuilder:
                 return SummarySnapshot(snapshot.generation, snapshot.revision, (), False)
             if scope is not None and fact.slot not in scope:
                 continue
+            if reference is not None and fact.observation_time is not None and fact.observation_time > reference:
+                # 未来计划仅当它在参照时点前已经被提出时可进入计划分区。
+                if not (fact.modality != 'asserted' and fact.source_time is not None and fact.source_time <= reference):
+                    continue
             if time_window is not None and fact.observation_time is not None and not time_window.contains(fact.observation_time):
                 continue
             if (self.versions and current.excluded.get(fact.id) == "duplicate_support"
@@ -89,7 +94,8 @@ class SummaryBuilder:
             uid = "sum_" + digest(str((snapshot.user_id, snapshot.generation, snapshot.revision,
                                        level, key, section, fid, sid, child_ids, text)))[:24]
             return SummaryUnit(uid, level, key, section, text, fid, sid, child_ids,
-                               tuple(sorted(set(coverage))), topic, phase, reference_ms=reference, display_fact_ids=tuple(display))
+                               tuple(sorted(set(coverage))), topic, phase, build_version=BUILD_VERSION,
+                               reference_ms=reference, display_fact_ids=tuple(display))
 
         for (session, topic, phase, section), facts in sorted(groups.items()):
             # 同阶段相同完整表达只压缩文字，所有来源仍进入依赖与覆盖清单。
