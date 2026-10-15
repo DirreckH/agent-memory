@@ -1,0 +1,400 @@
+{
+  "authorship": "Independently declared synthetic source spans and expected reasoning for this implementation. Development checks only; no official logs, hidden labels or automatic semantic gold.",
+  "scenarios": [
+    {
+      "id": "scoped_rule",
+      "split": "development",
+      "category": "F1",
+      "sources": [
+        {
+          "id": "state",
+          "content": "My project Cobalt status is pilot.",
+          "date": "2025-01-01",
+          "session": "state",
+          "role": "user",
+          "oracle_facts": [
+            {
+              "subject": "self",
+              "predicate": "project_status",
+              "scope": "Cobalt",
+              "value": "pilot",
+              "quote": "My project Cobalt status is pilot."
+            }
+          ]
+        },
+        {
+          "id": "rule",
+          "content": "Project Cobalt permits release only after review. Except for emergency repairs, two reviewers must sign.",
+          "date": "2025-01-01",
+          "session": "rule",
+          "role": "user",
+          "oracle_facts": []
+        },
+        {
+          "id": "other",
+          "content": "Project Juniper requires no review.",
+          "date": "2025-01-01",
+          "session": "other",
+          "role": "user",
+          "oracle_facts": []
+        }
+      ],
+      "questions": [
+        {
+          "id": "q1",
+          "query": "Summarize project Cobalt status, rules and exceptions.",
+          "as_of": "2025-06-01",
+          "top_k": 1,
+          "gold": {
+            "answer": "The observed status is pilot. Release requires review and two signatories except for emergency repairs.",
+            "reason": "State and the complete exception come from separate sources; the other project does not override this rule.",
+            "atoms": [
+              {
+                "claim": "observed phase",
+                "support": [
+                  {
+                    "source_id": "state",
+                    "quote": "My project Cobalt status is pilot."
+                  }
+                ]
+              },
+              {
+                "claim": "rule and exception",
+                "support": [
+                  {
+                    "source_id": "rule",
+                    "quote": "Project Cobalt permits release only after review. Except for emergency repairs, two reviewers must sign."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "Cobalt requires no review."
+            ],
+            "distractors": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "indirect_stance",
+      "split": "development",
+      "category": "F1",
+      "sources": [
+        {
+          "id": "a",
+          "content": "Project Cobalt initially worried me because the archive might be lost.",
+          "date": "2025-01-01",
+          "session": "a",
+          "role": "user",
+          "oracle_facts": []
+        },
+        {
+          "id": "b",
+          "content": "Project Cobalt: I requested an independent audit before giving my support.",
+          "date": "2025-02-01",
+          "session": "b",
+          "role": "user",
+          "oracle_facts": []
+        },
+        {
+          "id": "c",
+          "content": "Project Cobalt now has my support after the independent audit passed.",
+          "date": "2025-03-01",
+          "session": "c",
+          "role": "user",
+          "oracle_facts": []
+        }
+      ],
+      "questions": [
+        {
+          "id": "q1",
+          "query": "Across our discussions, how did my attitude toward project Cobalt evolve?",
+          "as_of": "2025-06-01",
+          "top_k": 1,
+          "gold": {
+            "answer": "Concern about losing the archive preceded conditional support pending an audit, then support after the audit passed.",
+            "reason": "All three observations are needed; the reason is explicit, not inferred from sentiment alone.",
+            "atoms": [
+              {
+                "claim": "early concern",
+                "support": [
+                  {
+                    "source_id": "a",
+                    "quote": "Project Cobalt initially worried me because the archive might be lost."
+                  }
+                ]
+              },
+              {
+                "claim": "condition",
+                "support": [
+                  {
+                    "source_id": "b",
+                    "quote": "Project Cobalt: I requested an independent audit before giving my support."
+                  }
+                ]
+              },
+              {
+                "claim": "later support",
+                "support": [
+                  {
+                    "source_id": "c",
+                    "quote": "Project Cobalt now has my support after the independent audit passed."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [],
+            "distractors": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "report_context",
+      "split": "development",
+      "category": "F1",
+      "sources": [
+        {
+          "id": "format",
+          "content": "Project Cobalt report format: use three sections, preserve caveats, and keep all dates.",
+          "date": "2025-01-01",
+          "session": "format",
+          "role": "user",
+          "oracle_facts": []
+        }
+      ],
+      "questions": [
+        {
+          "id": "q1",
+          "query": "Write the project Cobalt report using our previously agreed format.\nBackground:\n2025-02-01: first observation.\n2025-03-02: second observation.\n2025-04-03: third observation.",
+          "as_of": "2025-06-01",
+          "top_k": 1,
+          "gold": {
+            "answer": "Use three sections, retain caveats and dates, and use the current question as transient report material.",
+            "reason": "Dates in the supplied material are not a time filter for earlier formatting requirements.",
+            "atoms": [
+              {
+                "claim": "format and constraints",
+                "support": [
+                  {
+                    "source_id": "format",
+                    "quote": "Project Cobalt report format: use three sections, preserve caveats, and keep all dates."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "The history contains no agreed format."
+            ],
+            "distractors": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "long_source",
+      "split": "development",
+      "category": "F1",
+      "sources": [
+        {
+          "id": "long",
+          "content": "Project Cobalt notebook entry 0: routine inventory was checked.\n\nProject Cobalt notebook entry 1: routine inventory was checked.\n\nProject Cobalt notebook entry 2: routine inventory was checked.\n\nProject Cobalt notebook entry 3: routine inventory was checked.\n\nProject Cobalt notebook entry 4: routine inventory was checked.\n\nProject Cobalt notebook entry 5: routine inventory was checked.\n\nProject Cobalt notebook entry 6: routine inventory was checked.\n\nProject Cobalt notebook entry 7: routine inventory was checked.\n\nProject Cobalt notebook entry 8: routine inventory was checked.\n\nProject Cobalt notebook entry 9: routine inventory was checked.\n\nProject Cobalt notebook entry 10: routine inventory was checked.\n\nProject Cobalt notebook entry 11: routine inventory was checked.\n\nProject Cobalt notebook entry 12: routine inventory was checked.\n\nProject Cobalt notebook entry 13: routine inventory was checked.\n\nProject Cobalt notebook entry 14: routine inventory was checked.\n\nProject Cobalt notebook entry 15: routine inventory was checked.\n\nProject Cobalt notebook entry 16: routine inventory was checked.\n\nProject Cobalt notebook entry 17: routine inventory was checked.\n\nProject Cobalt notebook entry 18: routine inventory was checked.\n\nProject Cobalt notebook entry 19: routine inventory was checked.\n\nProject Cobalt notebook entry 20: routine inventory was checked.\n\nProject Cobalt notebook entry 21: routine inventory was checked.\n\nProject Cobalt notebook entry 22: routine inventory was checked.\n\nProject Cobalt notebook entry 23: routine inventory was checked.\n\nProject Cobalt notebook entry 24: routine inventory was checked.\n\nProject Cobalt notebook entry 25: routine inventory was checked.\n\nProject Cobalt notebook entry 26: routine inventory was checked.\n\nProject Cobalt notebook entry 27: routine inventory was checked.\n\nProject Cobalt notebook entry 28: routine inventory was checked.\n\nProject Cobalt notebook entry 29: routine inventory was checked.\n\nProject Cobalt notebook entry 30: routine inventory was checked.\n\nProject Cobalt notebook entry 31: routine inventory was checked.\n\nProject Cobalt notebook entry 32: routine inventory was checked.\n\nProject Cobalt notebook entry 33: routine inventory was checked.\n\nProject Cobalt notebook entry 34: routine inventory was checked.\n\nProject Cobalt notebook entry 35: routine inventory was checked.\n\nProject Cobalt notebook entry 36: routine inventory was checked.\n\nProject Cobalt notebook entry 37: routine inventory was checked.\n\nProject Cobalt notebook entry 38: routine inventory was checked.\n\nProject Cobalt notebook entry 39: routine inventory was checked.\n\nProject Cobalt notebook entry 40: routine inventory was checked.\n\nProject Cobalt notebook entry 41: routine inventory was checked.\n\nProject Cobalt notebook entry 42: routine inventory was checked.\n\nProject Cobalt notebook entry 43: routine inventory was checked.\n\nProject Cobalt notebook entry 44: routine inventory was checked.\n\nProject Cobalt notebook entry 45: routine inventory was checked.\n\nProject Cobalt notebook entry 46: routine inventory was checked.\n\nProject Cobalt notebook entry 47: routine inventory was checked.\n\nProject Cobalt notebook entry 48: routine inventory was checked.\n\nProject Cobalt notebook entry 49: routine inventory was checked.\n\nProject Cobalt notebook entry 50: routine inventory was checked.\n\nProject Cobalt notebook entry 51: routine inventory was checked.\n\nProject Cobalt notebook entry 52: routine inventory was checked.\n\nProject Cobalt notebook entry 53: routine inventory was checked.\n\nProject Cobalt notebook entry 54: routine inventory was checked.\n\nProject Cobalt notebook entry 55: routine inventory was checked.\n\nProject Cobalt notebook entry 56: routine inventory was checked.\n\nProject Cobalt notebook entry 57: routine inventory was checked.\n\nProject Cobalt notebook entry 58: routine inventory was checked.\n\nProject Cobalt notebook entry 59: routine inventory was checked.\n\nProject Cobalt notebook entry 60: routine inventory was checked.\n\nProject Cobalt notebook entry 61: routine inventory was checked.\n\nProject Cobalt notebook entry 62: routine inventory was checked.\n\nProject Cobalt notebook entry 63: routine inventory was checked.\n\nProject Cobalt notebook entry 64: routine inventory was checked.\n\nProject Cobalt notebook entry 65: routine inventory was checked.\n\nProject Cobalt notebook entry 66: routine inventory was checked.\n\nProject Cobalt notebook entry 67: routine inventory was checked.\n\nProject Cobalt notebook entry 68: routine inventory was checked.\n\nProject Cobalt notebook entry 69: routine inventory was checked.\n\nProject Cobalt notebook entry 70: routine inventory was checked.\n\nProject Cobalt notebook entry 71: routine inventory was checked.\n\nProject Cobalt notebook entry 72: routine inventory was checked.\n\nProject Cobalt notebook entry 73: routine inventory was checked.\n\nProject Cobalt notebook entry 74: routine inventory was checked.\n\nProject Cobalt notebook entry 75: routine inventory was checked.\n\nProject Cobalt notebook entry 76: routine inventory was checked.\n\nProject Cobalt notebook entry 77: routine inventory was checked.\n\nProject Cobalt notebook entry 78: routine inventory was checked.\n\nProject Cobalt notebook entry 79: routine inventory was checked.\n\nProject Cobalt notebook entry 80: routine inventory was checked.\n\nProject Cobalt notebook entry 81: routine inventory was checked.\n\nProject Cobalt notebook entry 82: routine inventory was checked.\n\nProject Cobalt notebook entry 83: routine inventory was checked.\n\nProject Cobalt notebook entry 84: routine inventory was checked.\n\nProject Cobalt notebook entry 85: routine inventory was checked.\n\nProject Cobalt notebook entry 86: routine inventory was checked.\n\nProject Cobalt notebook entry 87: routine inventory was checked.\n\nProject Cobalt notebook entry 88: routine inventory was checked.\n\nProject Cobalt notebook entry 89: routine inventory was checked.\n\nProject Cobalt notebook entry 90: routine inventory was checked.\n\nProject Cobalt notebook entry 91: routine inventory was checked.\n\nProject Cobalt notebook entry 92: routine inventory was checked.\n\nProject Cobalt notebook entry 93: routine inventory was checked.\n\nProject Cobalt notebook entry 94: routine inventory was checked.\n\nProject Cobalt notebook entry 95: routine inventory was checked.\n\nProject Cobalt notebook entry 96: routine inventory was checked.\n\nProject Cobalt notebook entry 97: routine inventory was checked.\n\nProject Cobalt notebook entry 98: routine inventory was checked.\n\nProject Cobalt notebook entry 99: routine inventory was checked.\n\nProject Cobalt notebook entry 100: routine inventory was checked.\n\nProject Cobalt notebook entry 101: routine inventory was checked.\n\nProject Cobalt notebook entry 102: routine inventory was checked.\n\nProject Cobalt notebook entry 103: routine inventory was checked.\n\nProject Cobalt notebook entry 104: routine inventory was checked.\n\nProject Cobalt notebook entry 105: routine inventory was checked.\n\nProject Cobalt notebook entry 106: routine inventory was checked.\n\nProject Cobalt notebook entry 107: routine inventory was checked.\n\nProject Cobalt notebook entry 108: routine inventory was checked.\n\nProject Cobalt notebook entry 109: routine inventory was checked.\n\nProject Cobalt notebook entry 110: routine inventory was checked.\n\nProject Cobalt notebook entry 111: routine inventory was checked.\n\nProject Cobalt notebook entry 112: routine inventory was checked.\n\nProject Cobalt notebook entry 113: routine inventory was checked.\n\nProject Cobalt notebook entry 114: routine inventory was checked.\n\nProject Cobalt notebook entry 115: routine inventory was checked.\n\nProject Cobalt notebook entry 116: routine inventory was checked.\n\nProject Cobalt notebook entry 117: routine inventory was checked.\n\nProject Cobalt notebook entry 118: routine inventory was checked.\n\nProject Cobalt notebook entry 119: routine inventory was checked.\n\nProject Cobalt notebook entry 120: routine inventory was checked.\n\nProject Cobalt notebook entry 121: routine inventory was checked.\n\nProject Cobalt notebook entry 122: routine inventory was checked.\n\nProject Cobalt notebook entry 123: routine inventory was checked.\n\nProject Cobalt notebook entry 124: routine inventory was checked.\n\nProject Cobalt notebook entry 125: routine inventory was checked.\n\nProject Cobalt notebook entry 126: routine inventory was checked.\n\nProject Cobalt notebook entry 127: routine inventory was checked.\n\nProject Cobalt notebook entry 128: routine inventory was checked.\n\nProject Cobalt notebook entry 129: routine inventory was checked.\n\nProject Cobalt notebook entry 130: routine inventory was checked.\n\nProject Cobalt notebook entry 131: routine inventory was checked.\n\nProject Cobalt notebook entry 132: routine inventory was checked.\n\nProject Cobalt notebook entry 133: routine inventory was checked.\n\nProject Cobalt notebook entry 134: routine inventory was checked.\n\nProject Cobalt notebook entry 135: routine inventory was checked.\n\nProject Cobalt notebook entry 136: routine inventory was checked.\n\nProject Cobalt notebook entry 137: routine inventory was checked.\n\nProject Cobalt notebook entry 138: routine inventory was checked.\n\nProject Cobalt notebook entry 139: routine inventory was checked.\n\nProject Cobalt notebook entry 140: routine inventory was checked.\n\nProject Cobalt notebook entry 141: routine inventory was checked.\n\nProject Cobalt notebook entry 142: routine inventory was checked.\n\nProject Cobalt notebook entry 143: routine inventory was checked.\n\nProject Cobalt notebook entry 144: routine inventory was checked.\n\nProject Cobalt notebook entry 145: routine inventory was checked.\n\nProject Cobalt notebook entry 146: routine inventory was checked.\n\nProject Cobalt notebook entry 147: routine inventory was checked.\n\nProject Cobalt notebook entry 148: routine inventory was checked.\n\nProject Cobalt notebook entry 149: routine inventory was checked.\n\nProject Cobalt notebook entry 150: routine inventory was checked.\n\nProject Cobalt notebook entry 151: routine inventory was checked.\n\nProject Cobalt notebook entry 152: routine inventory was checked.\n\nProject Cobalt notebook entry 153: routine inventory was checked.\n\nProject Cobalt notebook entry 154: routine inventory was checked.\n\nProject Cobalt notebook entry 155: routine inventory was checked.\n\nProject Cobalt notebook entry 156: routine inventory was checked.\n\nProject Cobalt notebook entry 157: routine inventory was checked.\n\nProject Cobalt notebook entry 158: routine inventory was checked.\n\nProject Cobalt notebook entry 159: routine inventory was checked.\n\nProject Cobalt notebook entry 160: routine inventory was checked.\n\nProject Cobalt notebook entry 161: routine inventory was checked.\n\nProject Cobalt notebook entry 162: routine inventory was checked.\n\nProject Cobalt notebook entry 163: routine inventory was checked.\n\nProject Cobalt notebook entry 164: routine inventory was checked.\n\nProject Cobalt notebook entry 165: routine inventory was checked.\n\nProject Cobalt notebook entry 166: routine inventory was checked.\n\nProject Cobalt notebook entry 167: routine inventory was checked.\n\nProject Cobalt notebook entry 168: routine inventory was checked.\n\nProject Cobalt notebook entry 169: routine inventory was checked.\n\nProject Cobalt notebook entry 170: routine inventory was checked.\n\nProject Cobalt notebook entry 171: routine inventory was checked.\n\nProject Cobalt notebook entry 172: routine inventory was checked.\n\nProject Cobalt notebook entry 173: routine inventory was checked.\n\nProject Cobalt notebook entry 174: routine inventory was checked.\n\nProject Cobalt notebook entry 175: routine inventory was checked.\n\nProject Cobalt notebook entry 176: routine inventory was checked.\n\nProject Cobalt notebook entry 177: routine inventory was checked.\n\nProject Cobalt notebook entry 178: routine inventory was checked.\n\nProject Cobalt notebook entry 179: routine inventory was checked.\n\nProject Cobalt notebook entry 180: routine inventory was checked.\n\nProject Cobalt notebook entry 181: routine inventory was checked.\n\nProject Cobalt notebook entry 182: routine inventory was checked.\n\nProject Cobalt notebook entry 183: routine inventory was checked.\n\nProject Cobalt notebook entry 184: routine inventory was checked.\n\nProject Cobalt notebook entry 185: routine inventory was checked.\n\nProject Cobalt notebook entry 186: routine inventory was checked.\n\nProject Cobalt notebook entry 187: routine inventory was checked.\n\nProject Cobalt notebook entry 188: routine inventory was checked.\n\nProject Cobalt notebook entry 189: routine inventory was checked.\n\nProject Cobalt notebook entry 190: routine inventory was checked.\n\nProject Cobalt notebook entry 191: routine inventory was checked.\n\nProject Cobalt notebook entry 192: routine inventory was checked.\n\nProject Cobalt notebook entry 193: routine inventory was checked.\n\nProject Cobalt notebook entry 194: routine inventory was checked.\n\nProject Cobalt notebook entry 195: routine inventory was checked.\n\nProject Cobalt notebook entry 196: routine inventory was checked.\n\nProject Cobalt notebook entry 197: routine inventory was checked.\n\nProject Cobalt notebook entry 198: routine inventory was checked.\n\nProject Cobalt notebook entry 199: routine inventory was checked.\n\nProject Cobalt notebook entry 200: routine inventory was checked.\n\nProject Cobalt notebook entry 201: routine inventory was checked.\n\nProject Cobalt notebook entry 202: routine inventory was checked.\n\nProject Cobalt notebook entry 203: routine inventory was checked.\n\nProject Cobalt notebook entry 204: routine inventory was checked.\n\nProject Cobalt notebook entry 205: routine inventory was checked.\n\nProject Cobalt notebook entry 206: routine inventory was checked.\n\nProject Cobalt notebook entry 207: routine inventory was checked.\n\nProject Cobalt notebook entry 208: routine inventory was checked.\n\nProject Cobalt notebook entry 209: routine inventory was checked.\n\nProject Cobalt notebook entry 210: routine inventory was checked.\n\nProject Cobalt notebook entry 211: routine inventory was checked.\n\nProject Cobalt notebook entry 212: routine inventory was checked.\n\nProject Cobalt notebook entry 213: routine inventory was checked.\n\nProject Cobalt notebook entry 214: routine inventory was checked.\n\nProject Cobalt notebook entry 215: routine inventory was checked.\n\nProject Cobalt notebook entry 216: routine inventory was checked.\n\nProject Cobalt notebook entry 217: routine inventory was checked.\n\nProject Cobalt notebook entry 218: routine inventory was checked.\n\nProject Cobalt notebook entry 219: routine inventory was checked.\n\nProject Cobalt: we decided to cancel the release because the safety review failed.\n\nProject Cobalt permits release only after review. Except for emergency repairs, two reviewers must sign.",
+          "date": "2025-01-01",
+          "session": "long",
+          "role": "user",
+          "oracle_facts": []
+        }
+      ],
+      "questions": [
+        {
+          "id": "q1",
+          "query": "Summarize project Cobalt decisions, reasons, rules and exceptions.",
+          "as_of": "2025-06-01",
+          "top_k": 1,
+          "gold": {
+            "answer": "The release was cancelled because the safety review failed. Preserve the rule and emergency exception.",
+            "reason": "Complete low-frequency decision and rule spans must survive a long source and a fixed visible budget.",
+            "atoms": [
+              {
+                "claim": "decision with reason",
+                "support": [
+                  {
+                    "source_id": "long",
+                    "quote": "Project Cobalt: we decided to cancel the release because the safety review failed."
+                  }
+                ]
+              },
+              {
+                "claim": "complete rule",
+                "support": [
+                  {
+                    "source_id": "long",
+                    "quote": "Project Cobalt permits release only after review. Except for emergency repairs, two reviewers must sign."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [],
+            "distractors": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "d1_control",
+      "split": "development",
+      "category": "D1_control",
+      "sources": [
+        {
+          "id": "old",
+          "content": "I work at Larch.",
+          "date": "2025-01-01",
+          "session": "old",
+          "role": "user",
+          "oracle_facts": [
+            {
+              "subject": "self",
+              "predicate": "employer",
+              "scope": "work",
+              "value": "Larch",
+              "quote": "I work at Larch."
+            }
+          ]
+        },
+        {
+          "id": "new",
+          "content": "I now work at Cedar.",
+          "date": "2025-02-01",
+          "session": "new",
+          "role": "user",
+          "oracle_facts": [
+            {
+              "subject": "self",
+              "predicate": "employer",
+              "scope": "work",
+              "value": "Cedar",
+              "quote": "I now work at Cedar."
+            }
+          ]
+        },
+        {
+          "id": "future",
+          "content": "I plan to join Elm next year.",
+          "date": "2025-03-01",
+          "session": "future",
+          "role": "user",
+          "oracle_facts": [
+            {
+              "subject": "self",
+              "predicate": "employer",
+              "scope": "work",
+              "value": "Elm",
+              "quote": "I plan to join Elm next year.",
+              "modality": "planned"
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "q1",
+          "query": "Where do I currently work?",
+          "as_of": "2025-06-01",
+          "top_k": 1,
+          "gold": {
+            "answer": "Cedar.",
+            "reason": "A newer confirmed observation overrides Larch; a plan does not override Cedar.",
+            "atoms": [
+              {
+                "claim": "current observation",
+                "support": [
+                  {
+                    "source_id": "new",
+                    "quote": "I now work at Cedar."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "Elm is the current employer."
+            ],
+            "distractors": []
+          }
+        },
+        {
+          "id": "q2",
+          "query": "What is my employment history?",
+          "as_of": "2025-06-01",
+          "top_k": 1,
+          "gold": {
+            "answer": "Larch was an earlier observation; Cedar is later; Elm is only a plan.",
+            "reason": "The historical query retains true prior observations.",
+            "atoms": [
+              {
+                "claim": "old observation",
+                "support": [
+                  {
+                    "source_id": "old",
+                    "quote": "I work at Larch."
+                  }
+                ]
+              },
+              {
+                "claim": "new observation",
+                "support": [
+                  {
+                    "source_id": "new",
+                    "quote": "I now work at Cedar."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [],
+            "distractors": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "ordinary_control",
+      "split": "development",
+      "category": "ordinary_control",
+      "sources": [
+        {
+          "id": "pref",
+          "content": "I prefer jasmine tea without sugar.",
+          "date": "2025-01-01",
+          "session": "pref",
+          "role": "user",
+          "oracle_facts": []
+        }
+      ],
+      "questions": [
+        {
+          "id": "q1",
+          "query": "Which tea do I prefer?",
+          "as_of": "2025-06-01",
+          "top_k": 1,
+          "gold": {
+            "answer": "Jasmine tea without sugar.",
+            "reason": "This ordinary preference query must preserve existing retrieval outputs.",
+            "atoms": [
+              {
+                "claim": "preference",
+                "support": [
+                  {
+                    "source_id": "pref",
+                    "quote": "I prefer jasmine tea without sugar."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [],
+            "distractors": []
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -141,6 +141,19 @@ def test_review_requires_traceable_reasons():
         reviewed_metrics({'items': [item]}, rows, set())
 
 
+def test_f1_review_compares_frozen_current_with_full_without_inventing_answers():
+    rows = [{'scenario': 's', 'question': 'q', 'split': 'development',
+             'modes': {'legacy': {}, 'full': {}, 'f1_plan': {}, 'f1_pack': {}}}]
+    items = []
+    for mode, correct in [('legacy', False), ('full', True)]:
+        item = review_item()
+        item.update(mode=mode, answer_correct=correct)
+        items.append(item)
+    result = reviewed_metrics({'items': items}, rows, {('legacy', 's', 'q'), ('full', 's', 'q')})
+    assert result['legacy_full_pairs'][0]['change'] == 'improved'
+    assert result['by_mode_split']['f1_plan']['development']['complete_accuracy'] is None
+
+
 def test_freezing_persistence_includes_governed_hit_without_baseline(tmp_path, monkeypatch):
     import app.service as service_module
     import app.storage as storage_module

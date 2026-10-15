@@ -252,7 +252,8 @@ def reviewed_metrics(review, rows, answer_keys, *, selftest=False):
             raise ValueError('Cannot grade a model answer that was never produced')
         decisions[key] = item
     summaries = {}
-    for mode in ('v3', 'v4', 'preserve', 'full', 'oracle'):
+    modes = sorted({mode for row in rows for mode in row['modes']} - {'off', 'shadow', 'f1_shadow'})
+    for mode in modes:
         summaries[mode] = {}
         for split in ('development', 'holdout'):
             selected = [r for r in rows if r['split'] == split]
@@ -261,12 +262,15 @@ def reviewed_metrics(review, rows, answer_keys, *, selftest=False):
             summaries[mode][split] = {'expected': len(selected), 'reviewed': len(graded),
                 'correct': sum(graded), 'accuracy_on_reviewed': sum(graded) / len(graded) if graded else None,
                 'complete_accuracy': sum(graded) / len(selected) if selected and len(graded) == len(selected) else None}
-    pairs = []
-    for row in rows:
-        base = decisions.get(('v3', row['scenario'], row['question']), {}).get('answer_correct')
-        full = decisions.get(('full', row['scenario'], row['question']), {}).get('answer_correct')
-        change = ('pending' if base is None or full is None else 'improved' if full and not base
-                  else 'regressed' if base and not full else 'unchanged')
-        pairs.append({'scenario': row['scenario'], 'question': row['question'], 'split': row['split'], 'change': change})
-    return {'real_model_evaluation': not selftest, 'by_mode_split': summaries, 'v3_full_pairs': pairs,
+    def pairs(baseline):
+        result = []
+        for row in rows:
+            base = decisions.get((baseline, row['scenario'], row['question']), {}).get('answer_correct')
+            full = decisions.get(('full', row['scenario'], row['question']), {}).get('answer_correct')
+            change = ('pending' if base is None or full is None else 'improved' if full and not base
+                      else 'regressed' if base and not full else 'unchanged')
+            result.append({'scenario': row['scenario'], 'question': row['question'], 'split': row['split'], 'change': change})
+        return result
+    return {'real_model_evaluation': not selftest, 'by_mode_split': summaries, 'v3_full_pairs': pairs('v3'),
+            'legacy_full_pairs': pairs('legacy') if 'legacy' in modes else [],
             'limitation': 'Small synthetic cases and a single frozen sample; no population or official-score claim.'}

@@ -6,10 +6,11 @@
 
 | 能力 | 实现内容 | 代码与示例配置默认值 |
 | --- | --- | --- |
-| V3 基础检索 | 用户隔离、增强文本与原文向量、查询扩展、双通道混合检索 | 保留原流程，`QUERY_DUAL_CHANNEL=true` |
+| V3 基础检索 | 用户隔离、原文保留、增强文本向量、查询扩展与双通道评分 | 保留原流程，`QUERY_DUAL_CHANNEL=true` |
 | 时间检索 | 规则优先的时间抽取、确定性窗口、时间打分 | `TEMPORAL_MODE=soft`、参照 `replay`、抽取 `hybrid` |
 | 多跳补充 | 分步目标召回、原文实体桥接、批次内邻接补充 | `MULTIHOP_ENABLED=true`；结构化规划与独立目标嵌入关闭 |
 | D1/F1 治理 | 事实版本、来源校验、分层抽取式摘要、依赖失效 | `GOVERNANCE_MODE=off`；验证环境显式使用 `shadow` |
+| F1 查询期覆盖 | 综合计划、原文补证、完整片段压缩、输出后覆盖报告 | `F1_MODE=legacy`；保留 D1 时可独立使用 `shadow` |
 
 【已验证】两轮改动保留既有消息库、向量、增强与时间模块。治理不会自动切换到 `active`。
 【存疑】真实抽取语义、最终回答质量及官网 B2/D1/F1 得分改善仍需验证。
@@ -24,6 +25,11 @@
 2026-10-14 新增 [真实链路对照程序](GOVERNANCE_E2E_EVALUATION.md)：12 个独立合成场景、
 21 个问题，固定模型输出比较 V3、原 V4、仅证据保全与完整治理，另设人工事实诊断组。
 程序及离线自检已完成；真实模型评测按用户安排留待服务器运行，尚无新的质量提升结论。
+
+2026-10-15 新增 [F1 查询期优化与验证](F1_VALIDATION.md)：独立综合计划、相关原文补证、
+完整片段压缩与输出后覆盖检查。351 项测试通过；冻结对照中相对本轮修改前，3 个问题的
+必要引文覆盖提高，25 个保持一致。结果来自替身模型，不代表最终回答或官网得分提高。
+默认 `F1_MODE=legacy`；保留 D1 并做新 F1 对照时使用 `GOVERNANCE_MODE=active`、`F1_MODE=shadow`。
 
 ## 接口协议
 
@@ -248,12 +254,13 @@ python -m scripts.run_multihop_regression --llm real --report data/multihop_defa
 
 ```dotenv
 GOVERNANCE_MODE=off                 # off / shadow / active；不会自动启用 active
+F1_MODE=legacy                     # legacy / shadow / active；仅控制新 F1 路径
 GOVERNANCE_STRICT_WRITE=false       # 仅 active 有效；true 时不完整抽取阻断写入
 GOVERNANCE_INPUT_TOKENS=3000         # 每批抽取输入工程预算
 GOVERNANCE_OUTPUT_TOKENS=4096        # 抽取输出上限
 GOVERNANCE_ADD_BUDGET_SECONDS=60     # 每次写入的额外抽取预算
 GOVERNANCE_SUMMARY_BUDGET_MS=50      # 本地摘要更新预算
-GOVERNANCE_QUERY_BUDGET_MS=50        # 治理查询新增处理预算
+GOVERNANCE_QUERY_BUDGET_MS=50        # 原治理路径预算；新 F1 不按该时间截断覆盖
 GOVERNANCE_CONTENT_TOKENS=8192       # 治理返回内容预算
 ```
 
@@ -267,7 +274,7 @@ GOVERNANCE_CONTENT_TOKENS=8192       # 治理返回内容预算
 `/set`、`/get` 的请求与响应字段、用户隔离、原有向量和基础检索保留。
 active 治理命中通常是一条组合结果：
 
-- `id` 使用 `gov_` 派生 ID，不是原 `memories` 行 ID；内容中保留来源 ID。
+- `id` 使用 `gov_` 或新 F1 的 `f1_` 派生 ID，不是原 `memories` 行 ID；内容中保留来源 ID。
 - `score` 继承关联基础命中的排序分；无关联命中时取基础首项分数，基础结果为空时为 `0.0`。它不是事实置信度。
 - `created_at` 继承关联基础命中的值；无关联命中时使用已纳入来源的持久化时间。它不是组合证据的生效时间。
 - 内容可以是来源片段与标签的组合；外部按消息 ID 查库、分数过滤或时间排序的逻辑需核验。
@@ -282,7 +289,44 @@ GOVERNANCE_MODE=off
 这不会撤销新代码的数据库迁移、原文列、提交记录或租约机制。
 `TEMPORAL_MODE=off` 也不会关闭 active 下的版本解析。
 
-### 4.4 迁移、回填与回退
+### 4.4 F1 查询期优化
+
+新增 `summary_planning.py`、`summary_retrieval.py`、`summary_assembly.py`。它们在同一用户
+快照中执行“需求识别 → 原文及版本证据 → 覆盖选择 → 抽取式压缩 → 输出后覆盖检查”。
+不修改 V3 增强、查询扩展、向量、时间评分或 D1 版本解析，不增加模型调用。
+
+| 总开关 | `F1_MODE` | 返回行为 |
+| --- | --- | --- |
+| `off` | 任意 | 原检索路径 |
+| `shadow` | 任意 | 原检索路径；可内部计算 F1 对照 |
+| `active` | `legacy`（默认） | 本轮修改前的治理路径 |
+| `active` | `shadow` | 计算新 F1；返回本轮修改前的治理结果，D1 继续生效 |
+| `active` | `active` | 仅识别到的综合任务走新 F1，其余查询保留现有治理 |
+
+- 支持显式总结、跨会话综合和报告需求；请求区与明确标识的材料、引用、选项分开。
+- 按范围补回 `no_fact`、部分抽取和未分类原文；保留来源 ID、字符范围、说话角色、
+  提及日期及明确有效日期。无可靠日期时只显示文档位置。
+- 主句与条件、同批相邻例外、更正依据共同收纳。已验证的同值重复观察可压缩文本，
+  保留支持来源；不同事件、不同限定、不同身份和真实变更不据此合并。
+- 在完整返回 JSON 的统一 token 预算内优先满足缺失需求，再检查实际输出。
+  报告区分完整输出、部分输出、预算遗漏和证据不足；这些是候选证据指标，不是答案正确率。
+- 新 F1 从最新原文和事实读取，不依赖旧摘要缓存，不需要数据库迁移、重复 Add 或重建向量。
+  无完整片段能够装入预算时不输出只有标题的摘要，也不回退到明确范围之外的旧值。
+
+新 F1 为避免扫描早停漏掉低频证据，不使用 `GOVERNANCE_QUERY_BUDGET_MS` 截断扫描；
+本地处理耗时可能增加。原有时间预算仍作用于原治理部分，内容预算对新 F1 继续生效。
+
+详见 [F1 实现与验证](F1_VALIDATION.md)。服务器可复用配对评测程序：
+
+```bash
+python scripts/run_governance_e2e.py run --f1-comparison --dataset tests/fixtures/f1_e2e_cases.json --visible-tokens 1500 --output data/f1_server
+```
+
+该命令使用当前模型配置并会产生模型调用费用；不修改生产数据库或服务器配置。
+完成后核验输出目录中的 `REVIEW.md`，填写 `review.json`，再运行 `review --output data/f1_server`。
+仅通过 `selftest` 或自动引文覆盖检查不能证明真实模型或官网 F1 得分提高。
+
+### 4.5 迁移、回填与回退
 
 升级前停止旧写入进程，处理遗留 `processing` 请求并备份。即使治理为 `off`，
 新代码初始化也会安装新增存储结构；首次治理迁移自动备份旧库，遇处理中请求拒绝迁移。

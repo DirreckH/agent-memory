@@ -95,6 +95,9 @@ class Settings(BaseSettings):
 
     # 派生治理索引：默认不改变原有写入和检索，active 必须显式配置。
     governance_mode: Literal["off", "shadow", "active"] = "off"
+    # F1 查询期覆盖：legacy=现有治理；shadow=对照但返回现有治理；active=显式启用。
+    # 它不控制 D1 或索引写入，且受 GOVERNANCE_MODE 总开关约束。
+    f1_mode: Literal["legacy", "shadow", "active"] = "legacy"
     governance_strict_write: bool = False
     governance_input_tokens: int = Field(default=3000, ge=256, le=32000)
     governance_output_tokens: int = Field(default=4096, ge=256, le=16384)

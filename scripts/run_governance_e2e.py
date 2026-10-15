@@ -27,8 +27,9 @@ from governance_e2e_support import (ANSWER_PROMPT, CompletionCache, InvalidCompl
 
 ROOT = Path(__file__).resolve().parents[1]
 DATASET = ROOT / 'tests/fixtures/governance_e2e_cases.json'
-BASELINES = {'v3': '9f096cf', 'v4': 'e90b153'}
+BASELINES = {'v3': '9f096cf', 'v4': 'e90b153', 'legacy': 'fe846f7'}
 MODES = ('v3', 'v4', 'preserve', 'full', 'off', 'shadow', 'oracle')
+F1_MODES = ('legacy', 'f1_plan', 'f1_pack', 'f1_shadow')
 FIXED_PERSISTENCE = '2025-07-01T00:00:00+00:00'
 
 
@@ -91,16 +92,21 @@ def prepare(args, settings):
             raise ValueError('Paired V3 prompts require MULTIHOP_STRUCTURED_PLANNER=false and MULTIHOP_EMBED_GOALS=false')
     oracle = {x['content']: x['oracle_facts'] for s in dataset['scenarios'] for x in s['sources']}
     assert len(oracle) == sum(len(s['sources']) for s in dataset['scenarios']), 'Duplicate source text needs scoped oracle keys'
+    modes = MODES + F1_MODES if args.f1_comparison else MODES
+    baselines = {m: r for m, r in BASELINES.items() if m in modes}
     commits = {mode: subprocess.run(['git', 'rev-parse', '--verify', revision + '^{commit}'], cwd=ROOT,
-                capture_output=True, text=True, check=True).stdout.strip() for mode, revision in BASELINES.items()}
-    manifest = {'schema': 1, 'dataset_sha256': sha(dataset), 'code_sha256': code_digest(), 'baselines': BASELINES,
+                capture_output=True, text=True, check=True).stdout.strip() for mode, revision in baselines.items()}
+    manifest = {'schema': 1, 'dataset_sha256': sha(dataset), 'code_sha256': code_digest(), 'baselines': baselines,
+                'modes': list(modes), 'f1_comparison': args.f1_comparison,
                 'baseline_commits': commits,
                 'split': args.split, 'selftest': args.command == 'selftest', 'settings': settings_manifest(settings),
                 'fingerprints': fingerprints(settings), 'visible_tokens': args.visible_tokens,
                 'answer_prompt': ANSWER_PROMPT, 'answer_max_tokens': 768, 'temperature': 0,
                 'persistence_clock': {'value': FIXED_PERSISTENCE, 'layers': ['service', 'storage']},
                 'evaluation_overrides': {'llm_failure_mode': 'strict', 'llm_max_retries': 0,
-                    'dashscope_max_retries': 0, 'governance_strict_write': False, 'input_log_enabled': False},
+                    'dashscope_max_retries': 0, 'governance_strict_write': False, 'input_log_enabled': False,
+                    **({'governance_query_budget_ms': 1000, 'governance_summary_budget_ms': 1000,
+                        'governance_content_tokens': args.visible_tokens} if args.f1_comparison else {})},
                 'scenarios': len(runtime['scenarios']),
                 'questions': sum(len(s['questions']) for s in runtime['scenarios']),
                 'gold_review': dataset['authorship']}
@@ -213,6 +219,8 @@ def worker(args):
     settings_values = dict(manifest['settings'], **manifest['evaluation_overrides'],
         governance_mode='off' if args.mode in ('v3', 'off') else 'active',
         warmup_embedding_on_startup=False, data_retention_days=3650)
+    settings_values['f1_mode'] = ('shadow' if args.mode == 'f1_shadow' else
+        'active' if manifest.get('f1_comparison') and args.mode not in ('legacy', 'v3', 'v4') else 'legacy')
     model = manifest['fingerprints']['llm']['model']
     llm_options = {}
     if 'multihop_retrieval' in inspect.signature(OpenAICompatibleMemoryLLM).parameters:
@@ -266,6 +274,50 @@ def worker(args):
                         evidence = super().collect(snapshot, context, plan)
                         self.trace['governance_result'] = encode(evidence)
                         return evidence
+
+                    def summarize(self, snapshot, context):
+                        from dataclasses import replace
+                        from app.governance.summary_planning import SummaryPlan, SummaryRequirement, build_summary_plan
+                        from app.governance.summary_retrieval import collect_summary
+                        from app.governance.summary_assembly import SummaryOutcome, assemble_summary
+                        if args.mode == 'f1_plan':
+                            p = build_summary_plan(context.query, snapshot, reference=context.reference, window=context.window)
+                            outcome = SummaryOutcome()
+                            if p.applicable:
+                                # 只替换 F1 计划；证据收集、覆盖标记、装箱仍用冻结前的逻辑。
+                                from app.governance.assembly import assemble
+                                legacy_plan = replace(context.plan, intent='summary', slots=p.slots,
+                                    reference=p.reference, window=p.window, knowledge_cutoff=p.knowledge_cutoff,
+                                    scope_keys=frozenset(p.scopes), global_summary=p.global_scope,
+                                    operations=('summarize',), requirements=('summarize',))
+                                evidence = self.collect(snapshot, context, legacy_plan)
+                                outcome = SummaryOutcome(tuple(assemble(evidence, context.baseline, snapshot,
+                                    limit=context.limit, token_budget=context.settings.governance_content_tokens)))
+                        elif args.mode == 'f1_pack':
+                            old = context.plan
+                            p = SummaryPlan()
+                            outcome = SummaryOutcome()
+                            if old.intent == 'summary':
+                                # 保持旧触发条件、槽位与时间解释，只替换来源覆盖和压缩。
+                                p = SummaryPlan(True, context.query, tuple(sorted(old.scope_keys)), old.slots,
+                                    old.global_summary or not old.scope_keys,
+                                    (SummaryRequirement('overview', '相关经历', context.query),),
+                                    old.reference, old.window, old.knowledge_cutoff)
+                                collection = collect_summary(snapshot, p)
+                                if not old.global_summary and not old.scope_keys:
+                                    # 旧计划没有范围目录时，仍保全其原本会考虑的基础原文和槽位来源。
+                                    # 不能把“仅覆盖压缩”消融错误实现成丢弃所有 no_fact 基础结果。
+                                    allowed = {h.id for h in context.baseline} | {
+                                        f.source_id for f in snapshot.facts if f.slot in old.slots}
+                                    collection = replace(collection, evidence=tuple(e for e in collection.evidence
+                                        if all(s.source_id in allowed for s in e.spans)))
+                                outcome = assemble_summary(collection, p, context.baseline,
+                                    snapshot, limit=context.limit, token_budget=context.settings.governance_content_tokens)
+                        else:
+                            p, outcome = super().summarize(snapshot, context)
+                        self.trace['f1_plan'] = encode(p)
+                        self.trace['f1_outcome'] = encode(outcome)
+                        return p, outcome
 
                 auditor = AuditRetriever(preserve_only=True) if args.mode == 'preserve' else AuditRetriever()
                 kwargs['governance_retriever'] = auditor
@@ -357,7 +409,9 @@ def answer(args, manifest, runs):
     output = {'status': 'running', 'human_review': 'pending', 'cases': []}
     try:
         # Holdout/development and all algorithms use exactly the same answering prompt/budget.
-        for mode in ('v3', 'v4', 'preserve', 'full', 'oracle'):
+        for mode in manifest.get('modes', MODES):
+            if mode in ('off', 'shadow', 'f1_shadow'):
+                continue
             for scene in runs[mode]['scenarios']:
                 for question in scene['queries']:
                     payload = {'question': question['query'], 'memories': question['visible_hits']}
@@ -388,7 +442,8 @@ def answer(args, manifest, runs):
 def build_report(folder):
     manifest = read_json(folder / 'manifest.json')
     gold = read_json(folder / 'gold.json')
-    runs = {mode: read_json(folder / f'runs/{mode}.json') for mode in MODES if (folder / f'runs/{mode}.json').exists()}
+    modes = manifest.get('modes', MODES)
+    runs = {mode: read_json(folder / f'runs/{mode}.json') for mode in modes if (folder / f'runs/{mode}.json').exists()}
     answers = read_json(folder / 'answers.json') if (folder / 'answers.json').exists() else {'status': 'not_run', 'cases': []}
     answer_map = {(a['mode'], a['scenario'], a['question']): a for a in answers['cases']}
     query_map = {(mode, s['id'], q['id']): q for mode, run in runs.items() for s in run['scenarios'] for q in s['queries']}
@@ -398,14 +453,14 @@ def build_report(folder):
         if manifest['split'] not in ('all', scene['split']):
             continue
         for question in scene['questions']:
-            modes = {}
-            for mode in MODES:
+            values = {}
+            for mode in modes:
                 actual = query_map.get((mode, scene['id'], question['id']))
                 if actual is None:
-                    modes[mode] = {'status': 'not_completed'}
+                    values[mode] = {'status': 'not_completed'}
                     continue
                 metrics = evidence_metrics(question['gold'], actual['visible_hits'])
-                modes[mode] = {'status': 'retrieved', 'metrics': metrics,
+                values[mode] = {'status': 'retrieved', 'metrics': metrics,
                                'answer': answer_map.get((mode, scene['id'], question['id'])),
                                'visible_tokens': actual['visible_tokens']}
                 review.append({'mode': mode, 'scenario': scene['id'], 'question': question['id'],
@@ -413,9 +468,12 @@ def build_report(folder):
                     'qualifiers_preserved': None, 'first_failure_stage': None, 'reason': '',
                     'reviewer': '', 'evidence_locations': []})
             rows.append({'scenario': scene['id'], 'split': scene['split'], 'category': scene['category'],
-                         'question': question['id'], 'query': question['query'], 'gold': question['gold'], 'modes': modes})
+                         'question': question['id'], 'query': question['query'], 'gold': question['gold'], 'modes': values})
     compatibility = {}
-    for left, right in (('v3', 'off'), ('off', 'shadow')):
+    checks = [('v3', 'off'), ('off', 'shadow')]
+    if manifest.get('f1_comparison'):
+        checks.append(('legacy', 'f1_shadow'))
+    for left, right in checks:
         pairs = [(query_map.get((left, r['scenario'], r['question'])), query_map.get((right, r['scenario'], r['question']))) for r in rows]
         complete = bool(pairs) and all(a is not None and b is not None for a, b in pairs)
         compatibility[f'{left}_vs_{right}'] = (all(a['hits'] == b['hits'] and a['calls'] == b['calls']
@@ -433,6 +491,25 @@ def build_report(folder):
               'answer_status': answers['status'], 'compatibility': compatibility, 'cases': rows,
               'final_answer_accuracy': None, 'overall_quality_conclusion': 'unverified',
               'real_model_evaluation': not manifest['selftest']}
+    if manifest.get('f1_comparison'):
+        paired = []
+        untouched = []
+        for row in rows:
+            key = (row['scenario'], row['question'])
+            base, full = query_map.get(('legacy', *key)), query_map.get(('full', *key))
+            if not base or not full:
+                continue
+            applicable = full.get('trace', {}).get('f1_plan', {}).get('applicable', False)
+            if not applicable:
+                untouched.append(base['hits'] == full['hits'] and base['calls'] == full['calls'])
+            a = evidence_metrics(row['gold'], base['visible_hits'])['verbatim_atom_coverage']
+            b = evidence_metrics(row['gold'], full['visible_hits'])['verbatim_atom_coverage']
+            paired.append({'scenario': key[0], 'question': key[1], 'f1_applicable': applicable,
+                'legacy_quote_coverage': a, 'full_quote_coverage': b,
+                'evidence_change': 'improved' if b > a else 'regressed' if b < a else 'unchanged',
+                'answer_quality': 'unverified'})
+        compatibility['legacy_vs_full_untouched'] = all(untouched) if untouched else None
+        report['f1_evidence_pairs'] = paired
     # Never overwrite a reviewer-edited file.
     if not (folder / 'review.json').exists():
         write_json(folder / 'review.json', {'rubric_version': 1, 'items': review})
@@ -465,7 +542,9 @@ def build_report(folder):
             lines += [f"- {atom['claim']}：" + ' 或 '.join(' + '.join(f"{s['source_id']}「{s['quote']}」" for s in group) for group in groups)]
         lines += ['', '禁止当作真实结论：' + '；'.join(row['gold']['forbidden_claims']), '']
         lines += ['误导来源：' + '；'.join(f"{d['source_id']}：{d['risk']}" for d in row['gold'].get('distractors', [])), '']
-        for mode in ('v3', 'v4', 'preserve', 'full', 'oracle'):
+        for mode in modes:
+            if mode in ('off', 'shadow', 'f1_shadow'):
+                continue
             value = row['modes'][mode]
             lines += [f'### {mode}', '']
             if value['status'] != 'retrieved':
@@ -488,8 +567,10 @@ def main():
     p.add_argument('--split', choices=('all', 'development', 'holdout'), default='all')
     p.add_argument('--visible-tokens', type=int, default=8192)
     p.add_argument('--skip-answers', action='store_true', help='Only capture/replay retrieval; answers explicitly remain unverified.')
+    p.add_argument('--f1-comparison', action='store_true',
+                   help='Compare fe846f7, F1 planning only, F1 coverage only, and combined; preserve D1.')
     p.add_argument('--expect-embedding-model', help='Fail before calls if the configured embedding model differs.')
-    p.add_argument('--mode', choices=MODES, default='full', help=argparse.SUPPRESS)
+    p.add_argument('--mode', choices=MODES + F1_MODES, default='full', help=argparse.SUPPRESS)
     p.add_argument('--record', action='store_true', help=argparse.SUPPRESS)
     p.add_argument('--root', type=Path, default=ROOT, help=argparse.SUPPRESS)
     args = p.parse_args()
@@ -524,7 +605,7 @@ def main():
                          'error_type': capture.get('error_type'), 'report': str(args.output / 'capture.json')}))
         return 2
     runs = {}
-    for mode in MODES:
+    for mode in manifest['modes']:
         runs[mode] = launch_worker(args, mode)
         print(canonical({'mode': mode, 'status': runs[mode]['status']}), flush=True)
         if runs[mode]['status'] != 'complete':
@@ -533,7 +614,9 @@ def main():
     report = build_report(args.output)
     # Earlier independent multihop can differ from V3. Shadow must preserve current off exactly.
     if (report['compatibility']['off_vs_shadow'] is not True or
-            report['compatibility']['capture_vs_replay_full'] is not True):
+            report['compatibility']['capture_vs_replay_full'] is not True or
+            report['compatibility'].get('legacy_vs_f1_shadow') is False or
+            report['compatibility'].get('legacy_vs_full_untouched') is False):
         print(canonical({'status': 'compatibility_failed', 'checks': report['compatibility']}))
         return 3
     if args.command != 'selftest' and not args.skip_answers:

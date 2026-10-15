@@ -45,8 +45,31 @@ class GovernanceRetriever:
             baseline=[h for h in baseline if h.id in snapshot.sources
                       and snapshot.sources[h.id].timestamp is not None
                       and snapshot.sources[h.id].timestamp<=p.knowledge_cutoff]
-        return assemble(result,baseline,snapshot,limit=ctx.limit,
-                        token_budget=ctx.settings.governance_content_tokens)
+        legacy = assemble(result,baseline,snapshot,limit=ctx.limit,
+                          token_budget=ctx.settings.governance_content_tokens)
+        if (getattr(ctx.settings, 'f1_mode', 'legacy') != 'legacy'
+                and self.summaries and self.versions and not self.preserve_only):
+            summary_plan, outcome = self.summarize(snapshot, ctx)
+            if summary_plan.applicable:
+                logger.info('F1 coverage emitted=%s omitted=%s missing=%s',
+                            len(outcome.emitted), len(outcome.omitted), len(outcome.missing))
+                if ctx.settings.f1_mode == 'active':
+                    # 已识别的时间/身份范围不能因缺证或预算不足而回退到范围外原文。
+                    # 无完整可用证据时返回空结果；不生成只有标题的伪摘要。
+                    return list(outcome.hits)
+        return legacy
+
+    def summarize(self, snapshot, ctx):
+        """独立 F1 执行入口；返回不可变审计结果，不在共享实例保存请求状态。"""
+        from app.governance.summary_planning import build_summary_plan
+        from app.governance.summary_retrieval import collect_summary
+        from app.governance.summary_assembly import assemble_summary, SummaryOutcome
+        summary_plan = build_summary_plan(ctx.query, snapshot, reference=ctx.reference, window=ctx.window)
+        if not summary_plan.applicable:
+            return summary_plan, SummaryOutcome()
+        outcome = assemble_summary(collect_summary(snapshot, summary_plan), summary_plan,
+            ctx.baseline, snapshot, limit=ctx.limit, token_budget=ctx.settings.governance_content_tokens)
+        return summary_plan, outcome
 
     def collect(self, snapshot, ctx, p):
         if p.intent=='ordinary' or not self.versions and p.intent!='summary':
