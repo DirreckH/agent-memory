@@ -30,9 +30,10 @@ class SummaryOutcome:
     coverage: tuple[SummaryCoverage, ...] = ()
     evidence: tuple = ()
     packet_tokens: int = 0
+    protection: object = None
 
 
-def assemble_summary(collection, summary_plan, baseline, snapshot, *, limit, token_budget):
+def assemble_summary(collection, summary_plan, baseline, snapshot, *, limit, token_budget, protected=()):
     from app.service import SearchHit
     items = [e for e in collection.evidence if all(valid_evidence(s, snapshot) for s in e.spans)]
     if not items or limit <= 0:
@@ -49,6 +50,8 @@ def assemble_summary(collection, summary_plan, baseline, snapshot, *, limit, tok
         seen_spans = seen_spans if seen_spans is not None else set()
         for ev in item.spans:
             citation = f'[{refs[ev.source_id]}:{ev.start}-{ev.end}]'
+            if item.local_attribution:
+                citation += f'[消息角色:{snapshot.sources[ev.source_id].role};归因以原文为准]'
             span_key = (ev.source_id, ev.start, ev.end)
             if span_key in seen_spans or (item.support_key and ev.quote.strip() in seen_quotes):
                 parts.append(citation)
@@ -116,8 +119,16 @@ def assemble_summary(collection, summary_plan, baseline, snapshot, *, limit, tok
         # 统一评测可见 memories 的序列化形式；包括换行转义和派生 ID 等开销。
         return token_count(json.dumps([asdict(hit)], ensure_ascii=False, sort_keys=True, separators=(',', ':')))
 
+    # The caller supplies whole, version-labelled units, including dependencies.
+    # Never split a unit to make the protected set fit. The guard audits shortfalls.
     chosen = []
-    pending = list(items)
+    protected = set(protected)
+    def unit_key(item):
+        return tuple((s.source_id, s.start, s.end, s.content_hash, s.purpose) for s in item.spans)
+    for item in items:
+        if unit_key(item) in protected and packet_cost(make_hit(chosen + [item])) <= token_budget:
+            chosen.append(item)
+    pending = [e for e in items if e not in chosen]
     frequency = Counter(k for item in items for k in item.facets if k != 'overview')
     while pending:
         covered = set().union(*(e.facets for e in chosen)) if chosen else set()

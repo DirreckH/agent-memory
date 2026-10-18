@@ -26,6 +26,7 @@ class GovernanceSearchContext:
     score_record: object = None
     window: object = None
     plan: QueryPlan | None = None
+    governance_evidence: GovernanceResult | None = None
 
 
 class GovernanceRetriever:
@@ -49,10 +50,14 @@ class GovernanceRetriever:
                           token_budget=ctx.settings.governance_content_tokens)
         if (getattr(ctx.settings, 'f1_mode', 'legacy') != 'legacy'
                 and self.summaries and self.versions and not self.preserve_only):
-            summary_plan, outcome = self.summarize(snapshot, ctx)
+            summary_plan, outcome = self.summarize(snapshot, replace(ctx, governance_evidence=result))
             if summary_plan.applicable:
                 logger.info('F1 coverage emitted=%s omitted=%s missing=%s',
                             len(outcome.emitted), len(outcome.omitted), len(outcome.missing))
+                if outcome.protection is not None:
+                    audit = outcome.protection
+                    logger.info('F1 protection passed=%s required=%s retained=%s missing=%s',
+                                audit.passed, audit.required_units, audit.retained_units, len(audit.missing_requirements))
                 if ctx.settings.f1_mode == 'active':
                     # 已识别的时间/身份范围不能因缺证或预算不足而回退到范围外原文。
                     # 无完整可用证据时返回空结果；不生成只有标题的伪摘要。
@@ -63,12 +68,14 @@ class GovernanceRetriever:
         """独立 F1 执行入口；返回不可变审计结果，不在共享实例保存请求状态。"""
         from app.governance.summary_planning import build_summary_plan
         from app.governance.summary_retrieval import collect_summary
-        from app.governance.summary_assembly import assemble_summary, SummaryOutcome
+        from app.governance.summary_assembly import SummaryOutcome
+        from app.governance.summary_guard import guarded_summary
         summary_plan = build_summary_plan(ctx.query, snapshot, reference=ctx.reference, window=ctx.window)
         if not summary_plan.applicable:
             return summary_plan, SummaryOutcome()
-        outcome = assemble_summary(collect_summary(snapshot, summary_plan), summary_plan,
-            ctx.baseline, snapshot, limit=ctx.limit, token_budget=ctx.settings.governance_content_tokens)
+        outcome = guarded_summary(collect_summary(snapshot, summary_plan), summary_plan,
+            ctx.baseline, snapshot, limit=ctx.limit, token_budget=ctx.settings.governance_content_tokens,
+            governance_result=ctx.governance_evidence)
         return summary_plan, outcome
 
     def collect(self, snapshot, ctx, p):

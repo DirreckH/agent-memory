@@ -19,7 +19,8 @@ def request(text='hello'):
 
 
 @pytest.mark.parametrize('dataset', [DATASET, json.loads((Path(__file__).parent /
-                         'fixtures/f1_evidence_units_cases.json').read_text(encoding='utf-8'))])
+                         'fixtures/f1_evidence_units_cases.json').read_text(encoding='utf-8')),
+                         json.loads((Path(__file__).parent / 'fixtures/f1_protection_cases.json').read_text(encoding='utf-8'))])
 def test_gold_is_source_backed_and_does_not_enter_runtime(dataset):
     validate_dataset(dataset)
     runtime = runtime_corpus(dataset)

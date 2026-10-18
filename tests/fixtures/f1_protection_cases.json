@@ -1,0 +1,352 @@
+{
+  "authorship": "Independent synthetic development contracts declared before paired execution. No official labels, no held-out generalization claim; no parser-generated answer gold.",
+  "scenarios": [
+    {
+      "id": "direct_identifier",
+      "category": "A1+F1",
+      "split": "development",
+      "sources": [
+        {
+          "id": "notes",
+          "content": "Project Alder notebook 0: routine inventory was checked.\n\nProject Alder notebook 1: routine inventory was checked.\n\nProject Alder notebook 2: routine inventory was checked.\n\nProject Alder notebook 3: routine inventory was checked.\n\nProject Alder notebook 4: routine inventory was checked.\n\nProject Alder notebook 5: routine inventory was checked.\n\nProject Alder notebook 6: routine inventory was checked.\n\nProject Alder notebook 7: routine inventory was checked.\n\nProject Alder notebook 8: routine inventory was checked.\n\nProject Alder notebook 9: routine inventory was checked.\n\nProject Alder notebook 10: routine inventory was checked.\n\nProject Alder notebook 11: routine inventory was checked.\n\nProject Alder notebook 12: routine inventory was checked.\n\nProject Alder notebook 13: routine inventory was checked.\n\nProject Alder notebook 14: routine inventory was checked.\n\nProject Alder notebook 15: routine inventory was checked.\n\nProject Alder notebook 16: routine inventory was checked.\n\nProject Alder notebook 17: routine inventory was checked.\n\nProject Alder notebook 18: routine inventory was checked.\n\nProject Alder notebook 19: routine inventory was checked.\n\nProject Alder notebook 20: routine inventory was checked.\n\nProject Alder notebook 21: routine inventory was checked.\n\nProject Alder notebook 22: routine inventory was checked.\n\nProject Alder notebook 23: routine inventory was checked.\n\nProject Alder notebook 24: routine inventory was checked.\n\nProject Alder notebook 25: routine inventory was checked.\n\nProject Alder notebook 26: routine inventory was checked.\n\nProject Alder notebook 27: routine inventory was checked.\n\nProject Alder notebook 28: routine inventory was checked.\n\nProject Alder notebook 29: routine inventory was checked.\n\nProject Alder notebook 30: routine inventory was checked.\n\nProject Alder notebook 31: routine inventory was checked.\n\nProject Alder notebook 32: routine inventory was checked.\n\nProject Alder notebook 33: routine inventory was checked.\n\nProject Alder notebook 34: routine inventory was checked.\n\nProject Alder notebook 35: routine inventory was checked.\n\nProject Alder archive identifier is AX-734; it belongs to the audit archive, not the deployment archive. Use it for restricted internal requests. The archived note retains the review history and the original access restrictions.",
+          "role": "user",
+          "oracle_facts": [],
+          "date": "2025-01-01",
+          "session": "notes"
+        }
+      ],
+      "questions": [
+        {
+          "id": "mixed",
+          "query": "Summarize project Alder and specify its archive identifier.",
+          "as_of": "2025-04-01",
+          "top_k": 1,
+          "gold": {
+            "answer": "AX-734 identifies the audit archive, not deployment; restricted internal use.",
+            "reason": "Independent source evidence contract; keep full qualifiers and attribution. Statements in assistant messages remain attributed reports, not user facts.",
+            "atoms": [
+              {
+                "claim": "identifier and full restriction",
+                "support": [
+                  {
+                    "source_id": "notes",
+                    "quote": "Project Alder archive identifier is AX-734; it belongs to the audit archive, not the deployment archive. Use it for restricted internal requests. The archived note retains the review history and the original access restrictions."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "AX-734 identifies deployment"
+            ],
+            "distractors": []
+          }
+        },
+        {
+          "id": "atomic",
+          "query": "What is the archive identifier for project Alder?",
+          "as_of": "2025-04-01",
+          "top_k": 1,
+          "gold": {
+            "answer": "AX-734, for the audit archive.",
+            "reason": "Independent source evidence contract; keep full qualifiers and attribution. Statements in assistant messages remain attributed reports, not user facts.",
+            "atoms": [
+              {
+                "claim": "identifier and full restriction",
+                "support": [
+                  {
+                    "source_id": "notes",
+                    "quote": "Project Alder archive identifier is AX-734; it belongs to the audit archive, not the deployment archive. Use it for restricted internal requests. The archived note retains the review history and the original access restrictions."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [],
+            "distractors": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "actor_reporter",
+      "category": "A2+F1",
+      "split": "development",
+      "sources": [
+        {
+          "id": "notes",
+          "content": "Project Alder notebook 0: routine inventory was checked.\n\nProject Alder notebook 1: routine inventory was checked.\n\nProject Alder notebook 2: routine inventory was checked.\n\nProject Alder notebook 3: routine inventory was checked.\n\nProject Alder notebook 4: routine inventory was checked.\n\nProject Alder notebook 5: routine inventory was checked.\n\nProject Alder notebook 6: routine inventory was checked.\n\nProject Alder notebook 7: routine inventory was checked.\n\nProject Alder notebook 8: routine inventory was checked.\n\nProject Alder notebook 9: routine inventory was checked.\n\nProject Alder notebook 10: routine inventory was checked.\n\nProject Alder notebook 11: routine inventory was checked.\n\nProject Alder notebook 12: routine inventory was checked.\n\nProject Alder notebook 13: routine inventory was checked.\n\nProject Alder notebook 14: routine inventory was checked.\n\nProject Alder notebook 15: routine inventory was checked.\n\nProject Alder notebook 16: routine inventory was checked.\n\nProject Alder notebook 17: routine inventory was checked.\n\nProject Alder notebook 18: routine inventory was checked.\n\nProject Alder notebook 19: routine inventory was checked.\n\nProject Alder notebook 20: routine inventory was checked.\n\nProject Alder notebook 21: routine inventory was checked.\n\nProject Alder notebook 22: routine inventory was checked.\n\nProject Alder notebook 23: routine inventory was checked.\n\nProject Alder notebook 24: routine inventory was checked.\n\nProject Alder notebook 25: routine inventory was checked.\n\nProject Alder notebook 26: routine inventory was checked.\n\nProject Alder notebook 27: routine inventory was checked.\n\nProject Alder notebook 28: routine inventory was checked.\n\nProject Alder notebook 29: routine inventory was checked.\n\nProject Alder notebook 30: routine inventory was checked.\n\nProject Alder notebook 31: routine inventory was checked.\n\nProject Alder notebook 32: routine inventory was checked.\n\nProject Alder notebook 33: routine inventory was checked.\n\nProject Alder notebook 34: routine inventory was checked.\n\nProject Alder notebook 35: routine inventory was checked.\n\nProject Alder: Mira reported that Jon proposed the trial; Mira did not propose it. This was a suggestion, without authorization to proceed. Expansion requires review and must not proceed until the reviewers have signed the complete audit record.",
+          "role": "assistant",
+          "oracle_facts": [],
+          "date": "2025-01-01",
+          "session": "notes"
+        }
+      ],
+      "questions": [
+        {
+          "id": "mixed",
+          "query": "Summarize project Alder and identify who proposed the trial.",
+          "as_of": "2025-04-01",
+          "top_k": 1,
+          "gold": {
+            "answer": "According to the recorded report, Jon proposed it and Mira relayed it. It was a suggestion. Expansion requires completed review signatures.",
+            "reason": "Independent source evidence contract; keep full qualifiers and attribution. Statements in assistant messages remain attributed reports, not user facts.",
+            "atoms": [
+              {
+                "claim": "actor, reporter, negation and modality",
+                "support": [
+                  {
+                    "source_id": "notes",
+                    "quote": "Project Alder: Mira reported that Jon proposed the trial; Mira did not propose it. This was a suggestion, without authorization to proceed. Expansion requires review and must not proceed until the reviewers have signed the complete audit record."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "Mira proposed the trial",
+              "Trial was authorized"
+            ],
+            "distractors": []
+          }
+        },
+        {
+          "id": "atomic",
+          "query": "Who proposed the trial in project Alder, and who reported it?",
+          "as_of": "2025-04-01",
+          "top_k": 1,
+          "gold": {
+            "answer": "The report attributes the proposal to Jon and the report to Mira.",
+            "reason": "Independent source evidence contract; keep full qualifiers and attribution. Statements in assistant messages remain attributed reports, not user facts.",
+            "atoms": [
+              {
+                "claim": "actor and reporter",
+                "support": [
+                  {
+                    "source_id": "notes",
+                    "quote": "Project Alder: Mira reported that Jon proposed the trial; Mira did not propose it. This was a suggestion, without authorization to proceed. Expansion requires review and must not proceed until the reviewers have signed the complete audit record."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [],
+            "distractors": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "protected_and_coverage",
+      "category": "A1+A2+F1",
+      "split": "development",
+      "sources": [
+        {
+          "id": "notes",
+          "content": "Project Alder notebook 0: routine inventory was checked.\n\nProject Alder notebook 1: routine inventory was checked.\n\nProject Alder notebook 2: routine inventory was checked.\n\nProject Alder notebook 3: routine inventory was checked.\n\nProject Alder notebook 4: routine inventory was checked.\n\nProject Alder notebook 5: routine inventory was checked.\n\nProject Alder notebook 6: routine inventory was checked.\n\nProject Alder notebook 7: routine inventory was checked.\n\nProject Alder notebook 8: routine inventory was checked.\n\nProject Alder notebook 9: routine inventory was checked.\n\nProject Alder notebook 10: routine inventory was checked.\n\nProject Alder notebook 11: routine inventory was checked.\n\nProject Alder notebook 12: routine inventory was checked.\n\nProject Alder notebook 13: routine inventory was checked.\n\nProject Alder notebook 14: routine inventory was checked.\n\nProject Alder notebook 15: routine inventory was checked.\n\nProject Alder notebook 16: routine inventory was checked.\n\nProject Alder notebook 17: routine inventory was checked.\n\nProject Alder notebook 18: routine inventory was checked.\n\nProject Alder notebook 19: routine inventory was checked.\n\nProject Alder notebook 20: routine inventory was checked.\n\nProject Alder notebook 21: routine inventory was checked.\n\nProject Alder notebook 22: routine inventory was checked.\n\nProject Alder notebook 23: routine inventory was checked.\n\nProject Alder notebook 24: routine inventory was checked.\n\nProject Alder notebook 25: routine inventory was checked.\n\nProject Alder notebook 26: routine inventory was checked.\n\nProject Alder notebook 27: routine inventory was checked.\n\nProject Alder notebook 28: routine inventory was checked.\n\nProject Alder notebook 29: routine inventory was checked.\n\nProject Alder notebook 30: routine inventory was checked.\n\nProject Alder notebook 31: routine inventory was checked.\n\nProject Alder notebook 32: routine inventory was checked.\n\nProject Alder notebook 33: routine inventory was checked.\n\nProject Alder notebook 34: routine inventory was checked.\n\nProject Alder notebook 35: routine inventory was checked.\n\nProject Alder archive identifier is AX-734; it belongs to the audit archive, not the deployment archive. Use it for restricted internal requests. The archived note retains the review history and the original access restrictions.\n\nProject Alder: Mira reported that Jon proposed the trial; Mira did not propose it. This was a suggestion, without authorization to proceed. Expansion requires review and must not proceed until the reviewers have signed the complete audit record.\n\nProject Alder: we decided to retain the archive; except for public copies, disclosure requires review.",
+          "role": "user",
+          "oracle_facts": [],
+          "date": "2025-01-01",
+          "session": "notes"
+        }
+      ],
+      "questions": [
+        {
+          "id": "mixed",
+          "query": "Summarize project Alder decisions and exceptions, specify the archive identifier and identify who proposed the trial.",
+          "as_of": "2025-04-01",
+          "top_k": 1,
+          "gold": {
+            "answer": "Retain the archive; public copies are excepted from disclosure review. AX-734 is restricted to internal audit requests. Jon proposed the trial; Mira reported it.",
+            "reason": "Independent source evidence contract; keep full qualifiers and attribution. Statements in assistant messages remain attributed reports, not user facts.",
+            "atoms": [
+              {
+                "claim": "archive field",
+                "support": [
+                  {
+                    "source_id": "notes",
+                    "quote": "Project Alder archive identifier is AX-734; it belongs to the audit archive, not the deployment archive. Use it for restricted internal requests. The archived note retains the review history and the original access restrictions."
+                  }
+                ]
+              },
+              {
+                "claim": "attribution",
+                "support": [
+                  {
+                    "source_id": "notes",
+                    "quote": "Project Alder: Mira reported that Jon proposed the trial; Mira did not propose it. This was a suggestion, without authorization to proceed. Expansion requires review and must not proceed until the reviewers have signed the complete audit record."
+                  }
+                ]
+              },
+              {
+                "claim": "decision and exception",
+                "support": [
+                  {
+                    "source_id": "notes",
+                    "quote": "Project Alder: we decided to retain the archive; except for public copies, disclosure requires review."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "Mira proposed the trial",
+              "All copies are exempt"
+            ],
+            "distractors": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "corrected_mixed_source",
+      "category": "D1+A1+F1",
+      "split": "development",
+      "sources": [
+        {
+          "id": "old",
+          "content": "My project Alder status is approved. The archive identifier is AX-734.",
+          "role": "user",
+          "oracle_facts": [
+            {
+              "subject": "self",
+              "predicate": "project_status",
+              "scope": "Alder",
+              "value": "approved",
+              "quote": "My project Alder status is approved."
+            }
+          ],
+          "date": "2025-01-01",
+          "session": "old"
+        },
+        {
+          "id": "fix",
+          "content": "Correction: My project Alder status is pending. The earlier approved entry was wrong.",
+          "role": "user",
+          "oracle_facts": [
+            {
+              "subject": "self",
+              "predicate": "project_status",
+              "scope": "Alder",
+              "value": "pending",
+              "quote": "My project Alder status is pending.",
+              "operation": "correct",
+              "target_value": "approved",
+              "update_quote": "Correction: My project Alder status is pending. The earlier approved entry was wrong."
+            }
+          ],
+          "date": "2025-02-01",
+          "session": "fix"
+        }
+      ],
+      "questions": [
+        {
+          "id": "mixed",
+          "query": "Summarize project Alder and specify its archive identifier and current project status.",
+          "as_of": "2025-04-01",
+          "top_k": 1,
+          "gold": {
+            "answer": "AX-734; pending. The earlier approval was corrected, not an actual prior approved stage.",
+            "reason": "Independent source evidence contract; keep full qualifiers and attribution. Statements in assistant messages remain attributed reports, not user facts.",
+            "atoms": [
+              {
+                "claim": "identifier with correction dependency",
+                "support": [
+                  {
+                    "source_id": "old",
+                    "quote": "My project Alder status is approved. The archive identifier is AX-734."
+                  },
+                  {
+                    "source_id": "fix",
+                    "quote": "Correction: My project Alder status is pending. The earlier approved entry was wrong."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "Currently approved"
+            ],
+            "distractors": []
+          }
+        },
+        {
+          "id": "current",
+          "query": "What is the current project status for project Alder?",
+          "as_of": "2025-04-01",
+          "top_k": 1,
+          "gold": {
+            "answer": "Pending.",
+            "reason": "Independent source evidence contract; keep full qualifiers and attribution. Statements in assistant messages remain attributed reports, not user facts.",
+            "atoms": [
+              {
+                "claim": "corrected status",
+                "support": [
+                  {
+                    "source_id": "fix",
+                    "quote": "My project Alder status is pending."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [
+              "Currently approved"
+            ],
+            "distractors": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "infeasible_joint_budget",
+      "category": "A1+F1",
+      "split": "development",
+      "sources": [
+        {
+          "id": "field",
+          "content": "Project Alder identifier is AX-734; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier;",
+          "role": "user",
+          "oracle_facts": [],
+          "date": "2025-01-01",
+          "session": "field"
+        },
+        {
+          "id": "rule",
+          "content": "Project Alder: we decided to retain the archive because the review failed; except for public copies, disclosure requires review. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail.",
+          "role": "user",
+          "oracle_facts": [],
+          "date": "2025-01-01",
+          "session": "rule"
+        }
+      ],
+      "questions": [
+        {
+          "id": "mixed",
+          "query": "Summarize project Alder decisions, reasons and exceptions and specify its identifier.",
+          "as_of": "2025-04-01",
+          "top_k": 1,
+          "gold": {
+            "answer": "The complete evidence identifies AX-734 and a retention decision caused by review failure, with a public-copy exception. Under this deliberately tight budget some evidence is missing; the guard must retain the previous F1 coverage and report that direct protection failed.",
+            "reason": "Independent source evidence contract; keep full qualifiers and attribution. Statements in assistant messages remain attributed reports, not user facts.",
+            "atoms": [
+              {
+                "claim": "direct identifier context",
+                "support": [
+                  {
+                    "source_id": "field",
+                    "quote": "Project Alder identifier is AX-734; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier; retain every qualifier;"
+                  }
+                ]
+              },
+              {
+                "claim": "F1 decision, reason and exception",
+                "support": [
+                  {
+                    "source_id": "rule",
+                    "quote": "Project Alder: we decided to retain the archive because the review failed; except for public copies, disclosure requires review. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail. The reviewers retain the complete audit trail."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [],
+            "distractors": []
+          }
+        }
+      ]
+    }
+  ]
+}

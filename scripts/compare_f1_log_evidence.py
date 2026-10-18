@@ -80,6 +80,12 @@ def worker(args):
     from app.governance.summary_assembly import assemble_summary
     from app.governance.evidence import valid_evidence
     from app.governance.extraction import token_count
+    # Historical roots use their own implementation; current roots exercise the
+    # same guard as production, with the deliberately absent baseline/facts.
+    assembler = assemble_summary
+    if (args.root / 'app/governance/summary_guard.py').exists():
+        from app.governance.summary_guard import guarded_summary
+        assembler = guarded_summary
 
     output = []
     for path in args.logs:
@@ -120,13 +126,14 @@ def worker(args):
                    'plan': encode(plan), 'emitted_spans': [], 'packet_tokens': 0, 'hits': []}
             if plan.applicable:
                 collection = collect_summary(snapshot, plan)
-                result = assemble_summary(collection, plan, [], snapshot,
+                result = assembler(collection, plan, [], snapshot,
                                           limit=body.get('top_k', 10), token_budget=args.visible_tokens)
                 assert all(valid_evidence(ev, snapshot) for e in result.evidence for ev in e.spans)
                 assert result.packet_tokens <= args.visible_tokens
                 spans = [ev for e in result.evidence for ev in e.spans]
                 row.update(candidate_units=len(collection.evidence), emitted_units=len(result.evidence),
-                           coverage=encode(result.coverage), packet_tokens=result.packet_tokens,
+                           coverage=encode(result.coverage), protection=encode(getattr(result, 'protection', None)),
+                           packet_tokens=result.packet_tokens,
                            quote_tokens=token_count('\n'.join(ev.quote for ev in spans)),
                            short_primary_units=sum(len(e.spans[0].quote.strip()) <= 10 for e in result.evidence),
                            emitted_spans=[{'source_id': s.source_id, 'start': s.start, 'end': s.end,
@@ -183,6 +190,7 @@ def main():
             'lost_characters': sum(s['end'] - s['start'] for s in lost),
             'gained_characters': sum(s['end'] - s['start'] for s in gained),
             'baseline_packet_tokens': a['packet_tokens'], 'current_packet_tokens': b['packet_tokens'],
+            'protection': b.get('protection'),
             'packing_probe_only': True, 'answer_quality': 'unverified'})
     write(args.output / 'comparison.json', {'manifest': manifest, 'cases': rows})
     print(json.dumps({'queries': len(rows), 'baseline_applicable': sum(r['baseline_applicable'] for r in rows),

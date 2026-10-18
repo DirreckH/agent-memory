@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import re
 
 from app.governance.planning import contains, plan as governance_plan
-from app.governance.registry import PROPERTIES
+from app.governance.registry import PROPERTIES, RELATION_ALIASES
 
 
 @dataclass(frozen=True)
@@ -34,6 +34,55 @@ class SummaryPlan:
     predicates: frozenset[str] = frozenset()
     focus_terms: tuple[str, ...] = ()
     task_kind: str = 'overview'
+    direct_requirements: tuple[SummaryRequirement, ...] = ()
+    attribution_requirements: tuple[SummaryRequirement, ...] = ()
+
+
+# F1-only evidence requests. These aliases do not register mutable D1 properties.
+DIRECT_FIELDS = {
+    **{p.key: p.aliases for p in PROPERTIES if p.key not in ('event', 'rules')},
+    **RELATION_ALIASES,
+    'identifier': ('identifier', 'serial number', 'reference number', '编号', '标识符'),
+    'amount': ('amount', 'budget', '金额', '预算金额'),
+}
+ATTRIBUTION_ACTIONS = {
+    'propose': ('propose', 'proposed', 'proposes', 'suggested', 'suggest', '提出', '提议', '建议者'),
+    'report': ('said', 'says', 'told', 'reported', 'reporter', 'relayed', '转述', '说过', '告诉', '发言者'),
+    'execute': ('implemented', 'executed', 'performed', '执行', '实施者'),
+    'approve': ('approved', 'authorized', '批准', '审批者'),
+}
+
+
+def protected_demands(task):
+    """Only explicit tasks request protection; supplied answers/materials never do.
+
+    Matching a phrase requests preservation, not certification of its truth. Unknown
+    action/field syntax remains on the existing F1 path rather than guessing actors.
+    """
+    # The older scope planner does not recognize bare "Materials:". Limit this
+    # extra sanitization to new protection requests; keep its routing unchanged.
+    task = task_text(re.sub(r'^\s*materials?\s*[:：]', 'Reference materials:', task, flags=re.I | re.M))
+    cue = re.search(r'\b(?:who|whose|what|which|where|state|specify|identify|include|retain|preserve)\b|'
+                    r'谁|哪|什么|多少|说明|指出|包括|包含|保留|负责人', task, re.I)
+    if not cue:
+        return (), ()
+    direct = []
+    for key, aliases in DIRECT_FIELDS.items():
+        trigger = next((t for t in aliases if contains(task, t)), None)
+        if trigger:
+            # Keep an exact query substring for the audit, including original case.
+            match = re.search(re.escape(trigger), task, re.I)
+            direct.append(SummaryRequirement('direct:' + key, trigger, match[0], aliases, 'direct'))
+    attribution = []
+    who = re.search(r'\b(?:who|whose|by whom|speaker|attribution)\b|谁|归因|提出者|转述者|说话人|执行者', task, re.I)
+    if who:
+        for key, aliases in ATTRIBUTION_ACTIONS.items():
+            trigger = next((t for t in aliases if contains(task, t)), None)
+            if trigger:
+                match = re.search(re.escape(trigger), task, re.I)
+                attribution.append(SummaryRequirement('attribution:' + key, '归因:' + trigger,
+                                                       match[0], aliases, 'attribution'))
+    return tuple(direct), tuple(attribution)
 
 
 FACETS = {
@@ -198,8 +247,11 @@ def build_summary_plan(query, snapshot, *, reference=None, window=None):
     constraints = tuple(m[0] for m in re.finditer(r'(?:保留|包括|包含|不得|不要)[^。；\n]+|'
                          r'\b(?:include|retain|preserve|do not)\b[^.;\n]+', task, re.I))
     warnings = ('身份待确认：同名主体分开展示，不推断跨会话为同一身份',) if p.ambiguous_identity else ()
+    direct, attribution = protected_demands(task)
+    # Reuse F1's established distinction between engagement likes and preferences.
+    direct = tuple(r for r in direct if r.key != 'direct:preference' or 'preference' in predicates)
     return SummaryPlan(True, task, tuple(sorted(scopes)), slots, not scopes and not predicates and not terms,
                        tuple(requirements), p.reference if p.reference is not None else reference,
                        p.window, p.knowledge_cutoff, warnings, order, constraints, frozenset(predicates), terms,
                        'report' if report else 'trajectory' if order == 'chronological' else
-                       'synthesis' if demands else 'overview')
+                       'synthesis' if demands else 'overview', direct, attribution)

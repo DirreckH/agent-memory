@@ -24,6 +24,7 @@ class SummaryEvidence:
     moments: tuple[int, ...] = ()
     kind: str = 'paragraph'
     supported: frozenset[str] = frozenset()
+    local_attribution: bool = False
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,9 @@ class SummaryCollection:
     evidence: tuple[SummaryEvidence, ...] = ()
     warnings: tuple[str, ...] = ()
     requirements: tuple[SummaryRequirement, ...] = ()
+    current_fact_ids: frozenset[str] = frozenset()
+    history_fact_ids: frozenset[str] = frozenset()
+    conflict_fact_ids: frozenset[str] = frozenset()
 
 
 def source_spans(source, facts=()):
@@ -214,4 +218,5 @@ def collect_summary(snapshot, summary_plan):
         warnings.append('未知消息日期未用于当时已知信息')
     compressed = [replace(e, supported=frozenset(r.key for r in requirements if source_support(e, r)))
                   for e in compressed]
-    return SummaryCollection(tuple(compressed), tuple(warnings), tuple(requirements))
+    return SummaryCollection(tuple(compressed), tuple(warnings), tuple(requirements),
+                             frozenset(current_ids), frozenset(history_ids), frozenset(conflict_ids))
