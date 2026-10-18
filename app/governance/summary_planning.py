@@ -13,6 +13,8 @@ class SummaryRequirement:
     key: str
     label: str
     trigger: str
+    terms: tuple[str, ...] = ()
+    origin: str = 'explicit'
 
 
 @dataclass(frozen=True)
@@ -31,19 +33,43 @@ class SummaryPlan:
     constraints: tuple[str, ...] = ()
     predicates: frozenset[str] = frozenset()
     focus_terms: tuple[str, ...] = ()
+    task_kind: str = 'overview'
 
 
 FACETS = {
     'goals': ('目标', r'\b(?:goals?|objectives?|aims?)\b|目标|目的'),
     'decisions': ('决定', r'\b(?:decisions?|decided|approved|cancelled|canceled)\b|决定|决策|取消|批准'),
     'reasons': ('明确原因', r'\b(?:why|reasons?|because|due to)\b|原因|因为|由于'),
-    'rules': ('规则与例外', r'\b(?:rules?|exceptions?|except|unless|only if|only after)\b|规则|例外|除非|仅当|只有'),
+    'rules': ('规则', r'\b(?:rules?|exceptions?|except|unless|only if|only after)\b|规则|例外|除非|仅当|只有'),
+    'exceptions': ('明确例外', r'\b(?:exceptions?|except|unless)\b|例外|除非'),
     'plans': ('计划', r'\b(?:plans?|planned|next steps?|intend\w*)\b|计划|打算|下一步'),
     'issues': ('未解决事项', r'\b(?:unresolved|pending|blocked|risks?|remaining issues?)\b|未解决|待确认|阻塞|风险|遗留'),
     'current': ('当前状态', r'\b(?:current|currently|status|now)\b|当前|目前|状态|现状'),
     'changes': ('变化', r'\b(?:changes?|changed|shift|evol\w*|trajectory)\b|变化|转变|演变|轨迹'),
     'structure': ('已约定的结构与格式', r'\b(?:structure|format|sections?|outline)\b|结构|格式|章节|提纲'),
+    'results': ('结果与数据', r'\b(?:results?|measurements?|findings?|outcomes?)\b|结果|测量|数据'),
+    'limitations': ('限制与限定', r'\b(?:limitations?|caveats?|uncertainty|not tested|only tested)\b|局限|限制|不确定|未测试'),
 }
+
+
+def evidence_demands(task):
+    """只从任务明确列出的证据类别派生需求，不把材料或预测答案转为事实。
+
+    首版支持 combining/using both X and Y data/results 等限定语法。未知组合
+    仍由现有概览处理，不猜测任意问句的隐含关系。
+    """
+    demands = []
+    patterns = [r'\b(?:combining|combine|combined|using both|based on both)\s+(?:the\s+)?'
+                r'(?P<a>[\w-]+(?:\s+[\w-]+){0,2}?)\s+and\s+(?P<b>[\w-]+(?:\s+[\w-]+){0,2}?)\s+'
+                r'(?:data|results?|measurements?|evidence|records?)\b',
+                r'(?:结合|综合)(?P<a>[\w-]{1,16})和(?P<b>[\w-]{1,16})(?:数据|结果|记录)']
+    for pattern in patterns:
+        for match in re.finditer(pattern, task, re.I):
+            for term in (match['a'].strip(), match['b'].strip()):
+                key = 'aspect:' + term.casefold()
+                if not any(r.key == key for r in demands):
+                    demands.append(SummaryRequirement(key, term + '证据', match[0], (term,), 'task_evidence'))
+    return demands
 
 
 def mentioned_projects(text):
@@ -55,7 +81,7 @@ def mentioned_projects(text):
 
 def task_text(query):
     """只用请求区规划；材料、引用、选项仍保留在 V3 的原始查询中。"""
-    text = re.sub(r'```[\s\S]*?```|<(?P<tag>context|source|document|materials)>[\s\S]*?</(?P=tag)>', '', query, flags=re.I)
+    text = re.sub(r'```[\s\S]*?```|~~~[\s\S]*?~~~|<(?P<tag>context|source|document|materials)>[\s\S]*?</(?P=tag)>', '', query, flags=re.I)
     def quoted_name(match):
         body = match[0][1:-1].strip()
         # 简短名称可以作为范围；整段引文及其中的命令、日期不能触发规划。
@@ -65,10 +91,11 @@ def task_text(query):
         return ''
     text = re.sub(r'"[^"\n]*"|“[^”\n]*”|「[^」\n]*」', quoted_name, text)
     material = re.compile(r'^\s*(?:#{1,6}\s*|\[)?(?:参考资料|材料|背景|上下文|引用|选项|'
-                          r'sources?|context|background|reference materials?|excerpts?|documents?|options)'
-                          r'\s*(?:\]|[:：])', re.I)
+                          r'sources?|context|background|reference materials?|excerpts?|documents?|options|'
+                          r'(?:conversation\s+)?transcripts?|artifacts?|prior outputs?)'
+                          r'\s*(?:\]\s*[:：]?|[:：]|$)', re.I)
     request = re.compile(r'^\s*(?:#{1,6}\s*|\[)?(?:任务|问题|请求|要求|(?:final\s+)?task|question|request|instructions)'
-                         r'\s*(?:\]|[:：])', re.I)
+                         r'\s*(?:\]\s*[:：]?|[:：]|$)', re.I)
     kept = []
     in_material = False
     for line in text.splitlines():
@@ -92,11 +119,13 @@ def build_summary_plan(query, snapshot, *, reference=None, window=None):
                        r'\b(?:give|provide|create|make)\b[^.?!\n]{0,35}\b(?:summary|overview|recap)\b|'
                        r'总结|概括|摘要|概览|梳理|回顾', task, re.I)
     across = re.search(r'\b(?:taken together|across|over the course|throughout)\b[^.?!\n]*'
-                       r'\b(?:discussions?|sessions?|conversations?|history)\b|'
+                       r'\b(?:discussions?|sessions?|conversations?|exchanges?|history)\b|'
                        r'(?:结合|综合|纵观|贯穿).*(?:历次|此前|会话|记录|讨论)', task, re.I)
     report = re.search(r'\b(?:write|draft|prepare|produce|generate)\b[^.?!\n]*\b(?:report|review|brief)\b|'
                        r'(?:撰写|写出|生成|整理).*(?:报告|综述|总结)', task, re.I)
-    signal = signal or across or report
+    demands = evidence_demands(task)
+    synthesis = re.search(r'\b(?:overall|conclusion|conclude|assess|assessment|evaluate)\b|总体|结论|综合评价', task, re.I)
+    signal = signal or across or report or (synthesis if len(demands) > 1 else None)
     if not signal:
         return SummaryPlan()
     # 材料日期不能收缩为检索窗口。只在请求文本未被剥离时复用 V3 的窗口。
@@ -107,18 +136,48 @@ def build_summary_plan(query, snapshot, *, reference=None, window=None):
     scopes.update(f.subject_name for f in snapshot.facts if f.subject_id in p.named_subjects)
     # 目录可能只有 no_fact 原文，不能要求一个项目先有结构化事实才能检索。
     scopes.update(mentioned_projects(task))
+    stance = re.search(r'\b(?:attitude|stance|position|opinion)\s+(?:towards?|on|about)\s+'
+                       r'(?P<topic>[\w-]+(?:\s+[\w-]+){0,5}?)(?=\s+(?:shift|chang\w*|evol\w*)\b|[?.!,;]|$)', task, re.I)
+    if stance and across and not scopes:
+        topic = stance['topic'].strip()
+        if not any(contains(s.content, topic) for s in snapshot.sources.values()):
+            return SummaryPlan(warnings=('unrecognized_scope',))
+        scopes.add(topic)
+    if (across and re.search(r'\bexchanges?\b', across[0], re.I) and not report
+            and not scopes and re.search(r'\b(?:stance|position|attitude)\b', task, re.I)):
+        # 新支持的对话轨迹只有在主体/主题范围明确时接管。不能把歧义指代扩展成全部历史。
+        return SummaryPlan(warnings=('unrecognized_scope',))
     requirements = [SummaryRequirement(key, label, m[0]) for key, (label, pattern) in FACETS.items()
                     if (m := re.search(pattern, task, re.I))]
+    requirements.extend(demands)
     if not requirements:
         requirements = [SummaryRequirement('overview', '相关经历', signal[0])]
     predicates = p.predicates - {'event', 'rules'}
+    if stance and across:
+        predicates = predicates - {'job_role', 'preference'}
+    # like(s) 也用于互动指标与举例。只有显式个人偏好请求才选择偏好槽位。
+    # 此消歧仅属于 F1；D1 的属性注册与版本解释保持原样。
+    if 'preference' in predicates and not re.search(
+            r'\b(?:preferences?|prefer\w*|favorite\w*)\b|\b(?:I|we|you)\s+(?:like|love)\b|'
+            r'\b(?:my|our|your|his|her|their)\s+(?:likes|dislikes)\b|偏好|喜好|喜欢', task, re.I):
+        predicates = predicates - {'preference'}
     slots = frozenset(f.slot for f in snapshot.facts if
         (not scopes or any(contains(f.scope, s) or contains(f.subject_name, s) for s in scopes))
         and (scopes or not predicates or f.predicate in predicates))
     terms = tuple(dict.fromkeys(a for prop in PROPERTIES if prop.key in predicates for a in prop.aliases))
     if 'employer' in predicates:
         terms += ('employment', 'work', 'working', '任职', '工作', '公司')
-    if not scopes and not predicates:
+    if demands and not scopes and not predicates:
+        terms = tuple(t for r in demands for t in r.terms)
+    if report and not scopes and not predicates:
+        # 报告中的材料指标不是用户属性。以报告主题和明确要求回忆的约定作检索范围。
+        topic = re.search(r'\b(?:write|draft|prepare|produce|generate)\s+(?:the\s+|an?\s+)?'
+                          r'([\w -]{1,60}?)\s+(?:report|review|brief)\b', task, re.I)
+        terms = tuple(t for t in re.findall(r'[A-Za-z][\w-]*', topic[1] if topic else '')
+                      if t.casefold() not in {'my', 'our', 'previously', 'agreed', 'new', 'final'})
+        if any(r.key == 'structure' for r in requirements):
+            terms += ('report', 'format', 'structure', 'outline', '报告', '格式', '结构', '提纲')
+    if not scopes and not predicates and not terms:
         # 未注册主题也应保持范围；只有明确全局请求或没有主题的概览才扫描全局。
         global_request = re.search(r'\b(?:all|entire|whole)\s+(?:my\s+|our\s+)?(?:history|discussions|sessions|conversations)\b|'
                                    r'(?:全部|所有|整个|全局).*(?:历史|经历|讨论|会话)', task, re.I)
@@ -141,4 +200,6 @@ def build_summary_plan(query, snapshot, *, reference=None, window=None):
     warnings = ('身份待确认：同名主体分开展示，不推断跨会话为同一身份',) if p.ambiguous_identity else ()
     return SummaryPlan(True, task, tuple(sorted(scopes)), slots, not scopes and not predicates and not terms,
                        tuple(requirements), p.reference if p.reference is not None else reference,
-                       p.window, p.knowledge_cutoff, warnings, order, constraints, frozenset(predicates), terms)
+                       p.window, p.knowledge_cutoff, warnings, order, constraints, frozenset(predicates), terms,
+                       'report' if report else 'trajectory' if order == 'chronological' else
+                       'synthesis' if demands else 'overview')

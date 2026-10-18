@@ -18,9 +18,11 @@ def request(text='hello'):
         temperature=0, max_tokens=512, response_format={'type': 'json_object'}, stream=False)
 
 
-def test_gold_is_source_backed_and_does_not_enter_runtime():
-    validate_dataset(DATASET)
-    runtime = runtime_corpus(DATASET)
+@pytest.mark.parametrize('dataset', [DATASET, json.loads((Path(__file__).parent /
+                         'fixtures/f1_evidence_units_cases.json').read_text(encoding='utf-8'))])
+def test_gold_is_source_backed_and_does_not_enter_runtime(dataset):
+    validate_dataset(dataset)
+    runtime = runtime_corpus(dataset)
     def keys(value):
         if isinstance(value, dict):
             return set(value) | set().union(*(keys(v) for v in value.values()))
@@ -28,8 +30,32 @@ def test_gold_is_source_backed_and_does_not_enter_runtime():
             return set().union(*(keys(v) for v in value))
         return set()
     assert not {'gold', 'answer', 'reason', 'oracle_facts', 'forbidden_claims'} & keys(runtime)
-    assert {s['id'] for s in runtime_corpus(DATASET, 'holdout')['scenarios']}.isdisjoint(
-        {s['id'] for s in runtime_corpus(DATASET, 'development')['scenarios']})
+    assert {s['id'] for s in runtime_corpus(dataset, 'holdout')['scenarios']}.isdisjoint(
+        {s['id'] for s in runtime_corpus(dataset, 'development')['scenarios']})
+
+
+def test_log_probe_preserves_user_time_and_successful_idempotency_boundaries(tmp_path):
+    from scripts.compare_f1_log_evidence import worker
+    root = Path(__file__).resolve().parents[1]
+    a, b = 'u_' + 'a' * 64, 'u_' + 'b' * 64
+    def add_record(user, request, content, status=200):
+        return {'status': status, 'path': '/set', 'body': json.dumps({'user_id': user,
+            'session_id': 'session', 'request_id': request,
+            'messages': [{'role': 'user', 'content': content, 'timestamp': 1704067200000}]})}
+    query = {'status': 200, 'path': '/get', 'body': json.dumps(
+        {'user_id': a, 'query': 'Summarize project Aster.', 'top_k': 1})}
+    first = add_record(a, 'a1', 'Project Aster initial note.')
+    records = [first, add_record(b, 'b1', 'Project Aster private foreign note.'), query,
+               first, add_record(a, 'a2', 'Project Aster failed note.', 500),
+               add_record(a, 'a3', 'Project Aster later note.'), query]
+    path = tmp_path / 'input.jsonl'
+    path.write_text('\n'.join(json.dumps(r) for r in records), encoding='utf-8')
+    worker(SimpleNamespace(root=root, logs=[path], output=tmp_path, worker='current', visible_tokens=8192))
+    results = json.loads((tmp_path / 'current.json').read_text(encoding='utf-8'))
+    assert [r['source_count'] for r in results] == [1, 2]
+    texts = ['\n'.join(h['content'] for h in r['hits']) for r in results]
+    assert 'later note' not in texts[0] and 'later note' in texts[1]
+    assert all('foreign note' not in t and 'failed note' not in t for t in texts)
 
 
 def test_invalid_gold_span_is_rejected():

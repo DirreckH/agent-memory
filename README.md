@@ -291,6 +291,11 @@ GOVERNANCE_MODE=off
 
 ### 4.4 F1 查询期优化
 
+2026-10-18 更新：[证据单元、打包与任务覆盖验证](F1_EVIDENCE_VALIDATION.md)。本轮以
+`0ec1465` 的 `GOVERNANCE_MODE=active`、`F1_MODE=active` 为主基线；已有 28 题的必要完整
+引文覆盖没有下降，新增 5 题中 4 题提高、1 题持平。全量 361 项测试通过；真实回答及
+官网得分改善仍未验证。
+
 新增 `summary_planning.py`、`summary_retrieval.py`、`summary_assembly.py`。它们在同一用户
 快照中执行“需求识别 → 原文及版本证据 → 覆盖选择 → 抽取式压缩 → 输出后覆盖检查”。
 不修改 V3 增强、查询扩展、向量、时间评分或 D1 版本解析，不增加模型调用。
@@ -299,8 +304,8 @@ GOVERNANCE_MODE=off
 | --- | --- | --- |
 | `off` | 任意 | 原检索路径 |
 | `shadow` | 任意 | 原检索路径；可内部计算 F1 对照 |
-| `active` | `legacy`（默认） | 本轮修改前的治理路径 |
-| `active` | `shadow` | 计算新 F1；返回本轮修改前的治理结果，D1 继续生效 |
+| `active` | `legacy`（默认） | F1 查询期模块之前的治理路径 |
+| `active` | `shadow` | 计算新 F1；返回与 `legacy` 相同的治理结果，D1 继续生效 |
 | `active` | `active` | 仅识别到的综合任务走新 F1，其余查询保留现有治理 |
 
 - 支持显式总结、跨会话综合和报告需求；请求区与明确标识的材料、引用、选项分开。
@@ -308,6 +313,10 @@ GOVERNANCE_MODE=off
   提及日期及明确有效日期。无可靠日期时只显示文档位置。
 - 主句与条件、同批相邻例外、更正依据共同收纳。已验证的同值重复观察可压缩文本，
   保留支持来源；不同事件、不同限定、不同身份和真实变更不据此合并。
+- 代码围栏、表格及注释、换行段落保持完整；来源元数据在每条返回中集中记录一次。
+  超大单元整体遗漏并标记缺口，不截断条件或语法结构。
+- 明确列出的多类数据建立独立覆盖需求；材料日期和互动指标不作为事实或个人偏好。
+  仅命中关键词保留为待核验候选，来源支持、预算缺口、证据不足分别记录。
 - 在完整返回 JSON 的统一 token 预算内优先满足缺失需求，再检查实际输出。
   报告区分完整输出、部分输出、预算遗漏和证据不足；这些是候选证据指标，不是答案正确率。
 - 新 F1 从最新原文和事实读取，不依赖旧摘要缓存，不需要数据库迁移、重复 Add 或重建向量。
@@ -316,15 +325,18 @@ GOVERNANCE_MODE=off
 新 F1 为避免扫描早停漏掉低频证据，不使用 `GOVERNANCE_QUERY_BUDGET_MS` 截断扫描；
 本地处理耗时可能增加。原有时间预算仍作用于原治理部分，内容预算对新 F1 继续生效。
 
-详见 [F1 实现与验证](F1_VALIDATION.md)。服务器可复用配对评测程序：
+早期实现见 [F1 实现与验证](F1_VALIDATION.md)。本轮服务器配对评测使用当前双 active 基线：
 
 ```bash
-python scripts/run_governance_e2e.py run --f1-comparison --dataset tests/fixtures/f1_e2e_cases.json --visible-tokens 1500 --output data/f1_server
+python scripts/run_governance_e2e.py run --f1-units-comparison --dataset tests/fixtures/f1_evidence_units_cases.json --visible-tokens 1400 --output data/f1_server
 ```
 
 该命令使用当前模型配置并会产生模型调用费用；不修改生产数据库或服务器配置。
 完成后核验输出目录中的 `REVIEW.md`，填写 `review.json`，再运行 `review --output data/f1_server`。
 仅通过 `selftest` 或自动引文覆盖检查不能证明真实模型或官网 F1 得分提高。
+
+`F1_MODE=shadow/legacy` 仍返回旧治理路径，不等于 `0ec1465` 双 active 返回；精确比较使用
+上述冻结基线参数。已使用双 active 的部署更新代码后会采用本轮修复，无需增加配置项。
 
 ### 4.5 迁移、回填与回退
 
