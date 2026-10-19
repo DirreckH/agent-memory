@@ -273,5 +273,4 @@ def reviewed_metrics(review, rows, answer_keys, *, selftest=False):
         return result
     return {'real_model_evaluation': not selftest, 'by_mode_split': summaries, 'v3_full_pairs': pairs('v3'),
             'legacy_full_pairs': pairs('legacy') if 'legacy' in modes else [],
-            'active_baseline_full_pairs': pairs('active_baseline') if 'active_baseline' in modes else [],
             'limitation': 'Small synthetic cases and a single frozen sample; no population or official-score claim.'}

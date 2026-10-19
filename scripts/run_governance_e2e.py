@@ -28,16 +28,8 @@ from governance_e2e_support import (ANSWER_PROMPT, CompletionCache, InvalidCompl
 ROOT = Path(__file__).resolve().parents[1]
 DATASET = ROOT / 'tests/fixtures/governance_e2e_cases.json'
 BASELINES = {'v3': '9f096cf', 'v4': 'e90b153', 'legacy': 'fe846f7'}
-BASELINES.update({mode: '0ec14657f7aaf80b5ab873bb156d3b49b507d768' for mode in
-                 ('active_baseline', 'baseline_off', 'baseline_shadow', 'baseline_f1_shadow')})
-BASELINES.update({mode: 'b005cefccca104b8292b23f4bcd5b566ecdace7f' for mode in
-                 ('guard_baseline', 'guard_off', 'guard_shadow', 'guard_f1_shadow')})
 MODES = ('v3', 'v4', 'preserve', 'full', 'off', 'shadow', 'oracle')
 F1_MODES = ('legacy', 'f1_plan', 'f1_pack', 'f1_shadow')
-F1_UNITS_MODES = ('active_baseline', 'full', 'off', 'shadow', 'baseline_off',
-                  'baseline_shadow', 'f1_shadow', 'baseline_f1_shadow')
-F1_GUARD_MODES = ('guard_baseline', 'protect_only', 'full', 'off', 'shadow',
-                  'guard_off', 'guard_shadow', 'f1_shadow', 'guard_f1_shadow')
 FIXED_PERSISTENCE = '2025-07-01T00:00:00+00:00'
 
 
@@ -100,15 +92,12 @@ def prepare(args, settings):
             raise ValueError('Paired V3 prompts require MULTIHOP_STRUCTURED_PLANNER=false and MULTIHOP_EMBED_GOALS=false')
     oracle = {x['content']: x['oracle_facts'] for s in dataset['scenarios'] for x in s['sources']}
     assert len(oracle) == sum(len(s['sources']) for s in dataset['scenarios']), 'Duplicate source text needs scoped oracle keys'
-    guard_comparison = getattr(args, 'f1_guard_comparison', False)
-    modes = F1_GUARD_MODES if guard_comparison else F1_UNITS_MODES if args.f1_units_comparison else MODES + F1_MODES if args.f1_comparison else MODES
+    modes = MODES + F1_MODES if args.f1_comparison else MODES
     baselines = {m: r for m, r in BASELINES.items() if m in modes}
     commits = {mode: subprocess.run(['git', 'rev-parse', '--verify', revision + '^{commit}'], cwd=ROOT,
                 capture_output=True, text=True, check=True).stdout.strip() for mode, revision in baselines.items()}
     manifest = {'schema': 1, 'dataset_sha256': sha(dataset), 'code_sha256': code_digest(), 'baselines': baselines,
                 'modes': list(modes), 'f1_comparison': args.f1_comparison,
-                'f1_units_comparison': args.f1_units_comparison,
-                'f1_guard_comparison': guard_comparison,
                 'baseline_commits': commits,
                 'split': args.split, 'selftest': args.command == 'selftest', 'settings': settings_manifest(settings),
                 'fingerprints': fingerprints(settings), 'visible_tokens': args.visible_tokens,
@@ -117,8 +106,7 @@ def prepare(args, settings):
                 'evaluation_overrides': {'llm_failure_mode': 'strict', 'llm_max_retries': 0,
                     'dashscope_max_retries': 0, 'governance_strict_write': False, 'input_log_enabled': False,
                     **({'governance_query_budget_ms': 1000, 'governance_summary_budget_ms': 1000,
-                        'governance_content_tokens': args.visible_tokens}
-                       if args.f1_comparison or args.f1_units_comparison or guard_comparison else {})},
+                        'governance_content_tokens': args.visible_tokens} if args.f1_comparison else {})},
                 'scenarios': len(runtime['scenarios']),
                 'questions': sum(len(s['questions']) for s in runtime['scenarios']),
                 'gold_review': dataset['authorship']}
@@ -229,11 +217,10 @@ def worker(args):
     freeze_persistence_clock(service_module, storage_module, FIXED_PERSISTENCE)
     record = args.record
     settings_values = dict(manifest['settings'], **manifest['evaluation_overrides'],
-        governance_mode='off' if args.mode in ('v3', 'off', 'baseline_off', 'guard_off') else 'active',
+        governance_mode='off' if args.mode in ('v3', 'off') else 'active',
         warmup_embedding_on_startup=False, data_retention_days=3650)
-    settings_values['f1_mode'] = ('shadow' if args.mode in ('f1_shadow', 'baseline_f1_shadow', 'guard_f1_shadow') else
-        'active' if (manifest.get('f1_comparison') or manifest.get('f1_units_comparison') or manifest.get('f1_guard_comparison'))
-        and args.mode not in ('legacy', 'v3', 'v4') else 'legacy')
+    settings_values['f1_mode'] = ('shadow' if args.mode == 'f1_shadow' else
+        'active' if manifest.get('f1_comparison') and args.mode not in ('legacy', 'v3', 'v4') else 'legacy')
     model = manifest['fingerprints']['llm']['model']
     llm_options = {}
     if 'multihop_retrieval' in inspect.signature(OpenAICompatibleMemoryLLM).parameters:
@@ -265,11 +252,11 @@ def worker(args):
     try:
         with tempfile.TemporaryDirectory(prefix='memory-e2e-db-') as td:
             settings = Settings(_env_file=None, **settings_values, database_path=Path(td) / 'memory.db')
-            if args.mode in ('shadow', 'baseline_shadow', 'guard_shadow'):
+            if args.mode == 'shadow':
                 settings = settings.model_copy(update={'governance_mode': 'shadow'})
             kwargs = {}
             auditor = None
-            if args.mode not in ('v3', 'off', 'baseline_off', 'guard_off'):
+            if args.mode not in ('v3', 'off'):
                 from app.governance.retrieval import GovernanceRetriever
 
                 class AuditRetriever(GovernanceRetriever):
@@ -293,15 +280,7 @@ def worker(args):
                         from app.governance.summary_planning import SummaryPlan, SummaryRequirement, build_summary_plan
                         from app.governance.summary_retrieval import collect_summary
                         from app.governance.summary_assembly import SummaryOutcome, assemble_summary
-                        if args.mode == 'protect_only':
-                            from app.governance.summary_guard import guarded_summary
-                            p = build_summary_plan(context.query, snapshot, reference=context.reference, window=context.window)
-                            outcome = SummaryOutcome()
-                            if p.applicable:
-                                outcome = guarded_summary(collect_summary(snapshot, p), p, context.baseline, snapshot,
-                                    limit=context.limit, token_budget=context.settings.governance_content_tokens,
-                                    governance_result=context.governance_evidence, preserve_coverage=False)
-                        elif args.mode == 'f1_plan':
+                        if args.mode == 'f1_plan':
                             p = build_summary_plan(context.query, snapshot, reference=context.reference, window=context.window)
                             outcome = SummaryOutcome()
                             if p.applicable:
@@ -360,11 +339,11 @@ def worker(args):
                     progress['writes'].append({'request_id': request_id, 'calls': sdk.stats['calls'][before:]})
                     if sdk.stats['errors'] or vectors.stats['errors']:
                         raise InvalidCompletion('Upstream stage failed; no fallback comparison')
-                    if args.mode not in ('v3', 'off', 'baseline_off', 'guard_off'):
+                    if args.mode not in ('v3', 'off'):
                         lookup = {service._memory_id(request_id, i): s for i, s in enumerate(group)}
                         progress['validation_audit'] += validation_audit(args.output, sdk.stats['calls'][before:],
                             lookup, oracle if args.mode == 'oracle' else None)
-                if args.mode not in ('v3', 'off', 'baseline_off', 'guard_off'):
+                if args.mode not in ('v3', 'off'):
                     snapshot = service.store.fetch_by_user(scene['id'], governance=True)
                     progress['snapshot'] = {name: encode(getattr(snapshot, name)) for name in
                         ('user_id', 'generation', 'revision', 'sources', 'facts', 'relations', 'statuses', 'summaries')}
@@ -491,15 +470,9 @@ def build_report(folder):
             rows.append({'scenario': scene['id'], 'split': scene['split'], 'category': scene['category'],
                          'question': question['id'], 'query': question['query'], 'gold': question['gold'], 'modes': values})
     compatibility = {}
-    checks = [('off', 'shadow')]
-    if 'v3' in modes:
-        checks.append(('v3', 'off'))
+    checks = [('v3', 'off'), ('off', 'shadow')]
     if manifest.get('f1_comparison'):
         checks.append(('legacy', 'f1_shadow'))
-    if manifest.get('f1_units_comparison'):
-        checks += [('baseline_off', 'off'), ('baseline_shadow', 'shadow'), ('baseline_f1_shadow', 'f1_shadow')]
-    if manifest.get('f1_guard_comparison'):
-        checks += [('guard_off', 'off'), ('guard_shadow', 'shadow'), ('guard_f1_shadow', 'f1_shadow')]
     for left, right in checks:
         pairs = [(query_map.get((left, r['scenario'], r['question'])), query_map.get((right, r['scenario'], r['question']))) for r in rows]
         complete = bool(pairs) and all(a is not None and b is not None for a, b in pairs)
@@ -518,39 +491,25 @@ def build_report(folder):
               'answer_status': answers['status'], 'compatibility': compatibility, 'cases': rows,
               'final_answer_accuracy': None, 'overall_quality_conclusion': 'unverified',
               'real_model_evaluation': not manifest['selftest']}
-    if manifest.get('f1_comparison') or manifest.get('f1_units_comparison') or manifest.get('f1_guard_comparison'):
-        baseline_mode = 'guard_baseline' if manifest.get('f1_guard_comparison') else 'active_baseline' if manifest.get('f1_units_comparison') else 'legacy'
+    if manifest.get('f1_comparison'):
         paired = []
         untouched = []
         for row in rows:
             key = (row['scenario'], row['question'])
-            base, full = query_map.get((baseline_mode, *key)), query_map.get(('full', *key))
+            base, full = query_map.get(('legacy', *key)), query_map.get(('full', *key))
             if not base or not full:
                 continue
             applicable = full.get('trace', {}).get('f1_plan', {}).get('applicable', False)
             if not applicable:
                 untouched.append(base['hits'] == full['hits'] and base['calls'] == full['calls'])
-            base_metrics = evidence_metrics(row['gold'], base['visible_hits'])
-            full_metrics = evidence_metrics(row['gold'], full['visible_hits'])
-            a = base_metrics['verbatim_atom_coverage']
-            b = full_metrics['verbatim_atom_coverage']
-            lost_atoms = [x['claim'] for x, y in zip(base_metrics['atoms'], full_metrics['atoms'])
-                          if x['all_spans_visible'] and not y['all_spans_visible']]
-            gained_atoms = [x['claim'] for x, y in zip(base_metrics['atoms'], full_metrics['atoms'])
-                            if not x['all_spans_visible'] and y['all_spans_visible']]
+            a = evidence_metrics(row['gold'], base['visible_hits'])['verbatim_atom_coverage']
+            b = evidence_metrics(row['gold'], full['visible_hits'])['verbatim_atom_coverage']
             paired.append({'scenario': key[0], 'question': key[1], 'f1_applicable': applicable,
-                'baseline_mode': baseline_mode, 'baseline_quote_coverage': a, 'full_quote_coverage': b,
-                **({'legacy_quote_coverage': a} if baseline_mode == 'legacy' else {}),
-                'hits_identical': base['hits'] == full['hits'], 'calls_identical': base['calls'] == full['calls'],
-                'd1_result_identical': base.get('trace', {}).get('governance_result') == full.get('trace', {}).get('governance_result'),
-                'protection': full.get('trace', {}).get('f1_outcome', {}).get('protection'),
-                'lost_atoms': lost_atoms, 'gained_atoms': gained_atoms,
-                'evidence_change': 'mixed' if lost_atoms and gained_atoms else 'regressed' if lost_atoms else
-                                   'improved' if gained_atoms else 'unchanged',
+                'legacy_quote_coverage': a, 'full_quote_coverage': b,
+                'evidence_change': 'improved' if b > a else 'regressed' if b < a else 'unchanged',
                 'answer_quality': 'unverified'})
-        compatibility[f'{baseline_mode}_vs_full_untouched'] = all(untouched) if untouched else None
+        compatibility['legacy_vs_full_untouched'] = all(untouched) if untouched else None
         report['f1_evidence_pairs'] = paired
-        report['quote_coverage_nonregression'] = all(not r['lost_atoms'] for r in paired)
     # Never overwrite a reviewer-edited file.
     if not (folder / 'review.json').exists():
         write_json(folder / 'review.json', {'rubric_version': 1, 'items': review})
@@ -610,18 +569,11 @@ def main():
     p.add_argument('--skip-answers', action='store_true', help='Only capture/replay retrieval; answers explicitly remain unverified.')
     p.add_argument('--f1-comparison', action='store_true',
                    help='Compare fe846f7, F1 planning only, F1 coverage only, and combined; preserve D1.')
-    p.add_argument('--f1-units-comparison', action='store_true',
-                   help='Primary baseline: frozen 0ec1465 with GOV/F1 active; also compare off/shadow paths.')
-    p.add_argument('--f1-guard-comparison', action='store_true',
-                   help='Frozen b005cef dual active vs protection only/full merge; compare off/shadow and D1 evidence.')
     p.add_argument('--expect-embedding-model', help='Fail before calls if the configured embedding model differs.')
-    p.add_argument('--mode', choices=tuple(dict.fromkeys(MODES + F1_MODES + F1_UNITS_MODES + F1_GUARD_MODES)),
-                   default='full', help=argparse.SUPPRESS)
+    p.add_argument('--mode', choices=MODES + F1_MODES, default='full', help=argparse.SUPPRESS)
     p.add_argument('--record', action='store_true', help=argparse.SUPPRESS)
     p.add_argument('--root', type=Path, default=ROOT, help=argparse.SUPPRESS)
     args = p.parse_args()
-    if sum((args.f1_comparison, args.f1_units_comparison, args.f1_guard_comparison)) > 1:
-        p.error('Select one baseline comparison at a time.')
     args.output = args.output.resolve()
     sys.stdout.reconfigure(encoding='utf-8')
     if args.command == 'worker':
@@ -664,9 +616,7 @@ def main():
     if (report['compatibility']['off_vs_shadow'] is not True or
             report['compatibility']['capture_vs_replay_full'] is not True or
             report['compatibility'].get('legacy_vs_f1_shadow') is False or
-            report['compatibility'].get('legacy_vs_full_untouched') is False or
-            any(value is False for key, value in report['compatibility'].items()
-                if key.startswith(('baseline_', 'active_baseline_')))):
+            report['compatibility'].get('legacy_vs_full_untouched') is False):
         print(canonical({'status': 'compatibility_failed', 'checks': report['compatibility']}))
         return 3
     if args.command != 'selftest' and not args.skip_answers:

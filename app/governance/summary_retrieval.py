@@ -5,13 +5,11 @@ from dataclasses import dataclass, replace
 import re
 
 from app.governance.evidence import date_text, valid_evidence
-from app.governance.extraction import digest
+from app.governance.extraction import digest, token_count
 from app.governance.models import Evidence
 from app.governance.planning import contains
 from app.governance.resolution import StateResolver
 from app.governance.summary_planning import FACETS, SummaryRequirement, mentioned_projects
-from app.governance.summary_units import CONTINUATION as _CONTINUATION, structural_ranges, unit_kind
-from app.governance.summary_requirements import source_support
 
 
 @dataclass(frozen=True)
@@ -22,9 +20,6 @@ class SummaryEvidence:
     fact_ids: tuple[str, ...] = ()
     support_key: tuple = ()
     moments: tuple[int, ...] = ()
-    kind: str = 'paragraph'
-    supported: frozenset[str] = frozenset()
-    local_attribution: bool = False
 
 
 @dataclass(frozen=True)
@@ -32,14 +27,40 @@ class SummaryCollection:
     evidence: tuple[SummaryEvidence, ...] = ()
     warnings: tuple[str, ...] = ()
     requirements: tuple[SummaryRequirement, ...] = ()
-    current_fact_ids: frozenset[str] = frozenset()
-    history_fact_ids: frozenset[str] = frozenset()
-    conflict_fact_ids: frozenset[str] = frozenset()
+
+
+_CONTINUATION = re.compile(r'^(?:except\b|unless\b|however\b|otherwise\b|but\b|only\b|'
+                           r'this\b|that\b|it\b|they\b|because\b|therefore\b|'
+                           r'例外|除非|否则|但|然而|其中|该|这|因为|因此)', re.I)
 
 
 def source_spans(source, facts=()):
-    """保留准确字符范围和完整结构；预算不能把代码/表格/条件拆散。"""
-    spans = structural_ranges(source.content)
+    """保留准确字符范围。只沿段落/句子边界切分；限定与相邻主句共同收纳。"""
+    paragraphs = [(m.start(), m.end()) for m in re.finditer(r'[^\n]+', source.content)
+                  if m[0].strip()]
+    spans = []
+    for start, end in paragraphs:
+        text = source.content[start:end]
+        if token_count(text) <= 240:
+            pieces = [(start, end)]
+        else:
+            # 不在小数、英文缩写内部或分号处断开；不可再分的长句保留完整。
+            cuts = [start]
+            for m in re.finditer(r'[。！？!?][”’\"\']?\s*|[.]\s+(?=[A-Z\u3400-\u9fff])', text):
+                prefix = text[:m.start()]
+                if re.search(r'\b(?:Mr|Mrs|Ms|Dr|Prof|vs|e\.g|i\.e)$', prefix):
+                    continue
+                cuts.append(start + m.end())
+            cuts.append(end)
+            pieces = [(a, b) for a, b in zip(cuts, cuts[1:]) if source.content[a:b].strip()]
+        for a, b in pieces:
+            if spans and (_CONTINUATION.search(source.content[a:b].lstrip())
+                          or source.content[spans[-1][0]:spans[-1][1]].rstrip().endswith((':', '：'))
+                          or re.fullmatch(r'\s*(?:Project\s+[\w-]+|项目[\w-]+)\s*',
+                                          source.content[spans[-1][0]:spans[-1][1]], re.I)):
+                spans[-1] = (spans[-1][0], b)
+            else:
+                spans.append((a, b))
     # 已验证的断言/限定跨越段落时，以完整证据范围为不可分割边界。
     for fact in facts:
         for ev in fact.evidence:
@@ -122,8 +143,6 @@ def collect_summary(snapshot, summary_plan):
                 if summary_plan.window is not None and not any(summary_plan.window.contains(t) for t in moments):
                     continue
             facets = {k for k, (_, pattern) in FACETS.items() if re.search(pattern, ev.quote, re.I)}
-            facets.update(r.key for r in summary_plan.requirements if r.terms and
-                          all(contains(ev.quote, t) for t in r.terms))
             facets.add('overview')
             if linked:
                 if any(f.id in current_ids and f.id not in conflict_ids and f.kind in ('state', 'preference') for f in linked):
@@ -170,8 +189,7 @@ def collect_summary(snapshot, summary_plan):
             # 混合原文中的错误说法必须与更正依据共同收纳，不能单独挤入返回结果。
             spans = tuple(dict.fromkeys((ev, *dependencies)))
             items.append(SummaryEvidence(spans, frozenset(facets), tuple(dict.fromkeys(labels)),
-                                         tuple(f.id for f in linked), support_key, tuple(sorted(set(moments))),
-                                         unit_kind(ev.quote)))
+                                         tuple(f.id for f in linked), support_key, tuple(sorted(set(moments)))))
     # 续句与主句共同竞争预算。相邻输入顺序只表示文档关系，不作为事件时间。
     removed = set()
     for child, parent in parents.items():
@@ -203,8 +221,8 @@ def collect_summary(snapshot, summary_plan):
     requirements = list(summary_plan.requirements)
     times = sorted({t for e in compressed for t in e.moments})
     if summary_plan.order == 'chronological' and len(times) > 1:
-        requirements += [SummaryRequirement('stage_first', '最早有日期的观察', summary_plan.task, origin='coverage_boundary'),
-                         SummaryRequirement('stage_last', '最晚有日期的观察', summary_plan.task, origin='coverage_boundary')]
+        requirements += [SummaryRequirement('stage_first', '最早有日期的观察', summary_plan.task),
+                         SummaryRequirement('stage_last', '最晚有日期的观察', summary_plan.task)]
         compressed = [replace(e, facets=e.facets | frozenset(
             (['stage_first'] if times[0] in e.moments else []) +
             (['stage_last'] if times[-1] in e.moments else []) +
@@ -216,7 +234,4 @@ def collect_summary(snapshot, summary_plan):
         warnings.append('无可靠日期的片段仅按文档位置展示；不推断事件先后')
     if summary_plan.knowledge_cutoff is not None and any(s.timestamp is None for s in snapshot.sources.values()):
         warnings.append('未知消息日期未用于当时已知信息')
-    compressed = [replace(e, supported=frozenset(r.key for r in requirements if source_support(e, r)))
-                  for e in compressed]
-    return SummaryCollection(tuple(compressed), tuple(warnings), tuple(requirements),
-                             frozenset(current_ids), frozenset(history_ids), frozenset(conflict_ids))
+    return SummaryCollection(tuple(compressed), tuple(warnings), tuple(requirements))
