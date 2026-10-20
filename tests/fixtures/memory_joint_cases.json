@@ -1,0 +1,562 @@
+{
+  "authorship": "Synthetic development regressions. Facts are explicitly frozen SDK drafts, including one deliberately incorrect attribution draft; no platform logs or hidden answers. Declared checks do not grade a final answer.",
+  "scenarios": [
+    {
+      "id": "attribute_lookup",
+      "category": "A1",
+      "sources": [
+        {
+          "id": "old",
+          "content": "I work at Birch.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "old",
+          "oracle_facts": [
+            {
+              "subject": "self",
+              "predicate": "employer",
+              "scope": "work",
+              "value": "Birch",
+              "quote": "I work at Birch."
+            }
+          ]
+        },
+        {
+          "id": "new",
+          "content": "I now work at Maple.",
+          "date": "2026-02-01",
+          "role": "user",
+          "session": "new",
+          "oracle_facts": [
+            {
+              "subject": "self",
+              "predicate": "employer",
+              "scope": "work",
+              "value": "Maple",
+              "quote": "I now work at Maple."
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "plain",
+          "query": "What is my employer?",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "I now work at Maple."
+          ],
+          "forbidden": [
+            "I work at Birch."
+          ]
+        },
+        {
+          "id": "current",
+          "query": "Where do I currently work?",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "I now work at Maple."
+          ],
+          "forbidden": [
+            "I work at Birch."
+          ]
+        },
+        {
+          "id": "ordinary",
+          "query": "Tell me about Birch.",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "expect_base_response": true,
+          "expect_baseline_unchanged": true
+        },
+        {
+          "id": "advice",
+          "query": "How can I improve my work?",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "expect_base_response": true,
+          "expect_baseline_unchanged": true
+        }
+      ]
+    },
+    {
+      "id": "reported_speaker",
+      "category": "A2/C3",
+      "sources": [
+        {
+          "id": "own",
+          "content": "I work at Orchard.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "own",
+          "oracle_facts": [
+            {
+              "subject": "self",
+              "predicate": "employer",
+              "scope": "work",
+              "value": "Orchard",
+              "quote": "I work at Orchard."
+            }
+          ]
+        },
+        {
+          "id": "reported",
+          "content": "Nora said, \"I work at Pine.\"",
+          "date": "2026-02-01",
+          "role": "user",
+          "session": "reported",
+          "oracle_facts": [
+            {
+              "subject": "self",
+              "predicate": "employer",
+              "scope": "work",
+              "value": "Pine",
+              "quote": "Nora said, \"I work at Pine.\""
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "current",
+          "query": "Where do I currently work?",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "I work at Orchard."
+          ],
+          "forbidden_facts": [
+            {
+              "subject": "self",
+              "value": "Pine"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "natural_event_date",
+      "category": "C1/A1",
+      "sources": [
+        {
+          "id": "late_report",
+          "content": "I worked at Birch on January 5, 2026.",
+          "date": "2026-03-01",
+          "role": "user",
+          "session": "late_report",
+          "oracle_facts": [
+            {
+              "subject": "self",
+              "predicate": "employer",
+              "scope": "work",
+              "value": "Birch",
+              "quote": "I worked at Birch on January 5, 2026.",
+              "valid_from": "2026-01-05",
+              "time_quote": "January 5, 2026"
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "history",
+          "query": "Where did I work on January 6, 2026?",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "I worked at Birch on January 5, 2026."
+          ],
+          "required_facts": [
+            {
+              "value": "Birch",
+              "valid_from": 1767571200000,
+              "time_precision": "day"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "relative_date",
+      "category": "C1/A1",
+      "sources": [
+        {
+          "id": "relative",
+          "content": "I joined Maple yesterday.",
+          "date": "2026-01-06",
+          "role": "user",
+          "session": "relative",
+          "oracle_facts": [
+            {
+              "subject": "self",
+              "predicate": "employer",
+              "scope": "work",
+              "value": "Maple",
+              "quote": "I joined Maple yesterday.",
+              "valid_from": "2026-01-05",
+              "time_quote": "yesterday"
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "history",
+          "query": "Where did I work on January 5, 2026?",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "I joined Maple yesterday."
+          ],
+          "required_facts": [
+            {
+              "value": "Maple",
+              "valid_from": 1767571200000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "event_order",
+      "category": "C2/F1",
+      "sources": [
+        {
+          "id": "launch",
+          "content": "Project Meridian: I approved launch on January 4, 2026.",
+          "date": "2026-01-05",
+          "role": "user",
+          "session": "launch",
+          "oracle_facts": [
+            {
+              "subject": "self",
+              "predicate": "event",
+              "scope": "Meridian",
+              "value": "launch",
+              "quote": "Project Meridian: I approved launch on January 4, 2026.",
+              "kind": "event",
+              "valid_from": "2026-01-04",
+              "time_quote": "January 4, 2026"
+            }
+          ]
+        },
+        {
+          "id": "design",
+          "content": "Project Meridian: I approved design review on January 2, 2026.",
+          "date": "2026-01-10",
+          "role": "user",
+          "session": "design",
+          "oracle_facts": [
+            {
+              "subject": "self",
+              "predicate": "event",
+              "scope": "Meridian",
+              "value": "design review",
+              "quote": "Project Meridian: I approved design review on January 2, 2026.",
+              "kind": "event",
+              "valid_from": "2026-01-02",
+              "time_quote": "January 2, 2026"
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "order",
+          "query": "Across our discussions, summarize project Meridian in chronological order.",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "Project Meridian: I approved design review on January 2, 2026.",
+            "Project Meridian: I approved launch on January 4, 2026."
+          ],
+          "ordered": [
+            [
+              "Project Meridian: I approved design review on January 2, 2026.",
+              "Project Meridian: I approved launch on January 4, 2026."
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pronoun_packet",
+      "category": "A2/F1",
+      "sources": [
+        {
+          "id": "review",
+          "content": "Project Meridian review\nDana presented the proposal.\nShe approved rollout.",
+          "date": "2026-01-05",
+          "role": "user",
+          "session": "review",
+          "oracle_facts": []
+        }
+      ],
+      "questions": [
+        {
+          "id": "decisions",
+          "query": "Summarize project Meridian decisions.",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "Dana presented the proposal.",
+            "She approved rollout."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rule_packet",
+      "category": "A/F1",
+      "sources": [
+        {
+          "id": "rule",
+          "content": "Project Meridian rule: release requires owner review.\nException: emergency repairs require two signatories.",
+          "date": "2026-01-05",
+          "role": "user",
+          "session": "rule",
+          "oracle_facts": []
+        }
+      ],
+      "questions": [
+        {
+          "id": "rules",
+          "query": "Summarize project Meridian rules.",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "Project Meridian rule: release requires owner review.",
+            "Exception: emergency repairs require two signatories."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "task_material",
+      "category": "F1",
+      "sources": [
+        {
+          "id": "format",
+          "content": "Project Meridian report format: retain decisions, dates, and exceptions.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "format",
+          "oracle_facts": []
+        }
+      ],
+      "questions": [
+        {
+          "id": "report",
+          "query": "CONVERSATION TRANSCRIPT:\n2024-01-01 background.\n2024-02-02 background.\n2024-03-03 background.\nFINAL TASK:\nPrepare the project Meridian report using the agreed format.",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "Project Meridian report format: retain decisions, dates, and exceptions."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "genuine_change",
+      "category": "C3",
+      "sources": [
+        {
+          "id": "old",
+          "content": "I work at Birch.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "old",
+          "oracle_facts": [
+            {
+              "subject": "self",
+              "predicate": "employer",
+              "scope": "work",
+              "value": "Birch",
+              "quote": "I work at Birch."
+            }
+          ]
+        },
+        {
+          "id": "new",
+          "content": "I changed from Birch to Maple.",
+          "date": "2026-02-01",
+          "role": "user",
+          "session": "new",
+          "oracle_facts": [
+            {
+              "subject": "self",
+              "predicate": "employer",
+              "scope": "work",
+              "value": "Maple",
+              "quote": "I changed from Birch to Maple.",
+              "operation": "change",
+              "target_value": "Birch",
+              "update_quote": "I changed from Birch to Maple."
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "current",
+          "query": "Where do I currently work?",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "I changed from Birch to Maple."
+          ],
+          "forbidden": [
+            "I work at Birch."
+          ],
+          "expect_baseline_unchanged": true
+        },
+        {
+          "id": "history",
+          "query": "What is my employment history?",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "I work at Birch.",
+            "I changed from Birch to Maple."
+          ],
+          "expect_baseline_unchanged": true
+        }
+      ]
+    },
+    {
+      "id": "correction",
+      "category": "C3",
+      "sources": [
+        {
+          "id": "old",
+          "content": "I work at Birch.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "old",
+          "oracle_facts": [
+            {
+              "subject": "self",
+              "predicate": "employer",
+              "scope": "work",
+              "value": "Birch",
+              "quote": "I work at Birch."
+            }
+          ]
+        },
+        {
+          "id": "fix",
+          "content": "Correction: I never worked at Birch. I work at Maple.",
+          "date": "2026-02-01",
+          "role": "user",
+          "session": "fix",
+          "oracle_facts": [
+            {
+              "subject": "self",
+              "predicate": "employer",
+              "scope": "work",
+              "value": "Maple",
+              "quote": "I work at Maple.",
+              "operation": "correct",
+              "target_value": "Birch",
+              "update_quote": "Correction: I never worked at Birch. I work at Maple."
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "current",
+          "query": "Where do I currently work?",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "I work at Maple."
+          ],
+          "forbidden": [
+            "I work at Birch."
+          ],
+          "expect_baseline_unchanged": true
+        },
+        {
+          "id": "history",
+          "query": "What is my employment history?",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "Correction: I never worked at Birch. I work at Maple.",
+            "I work at Maple."
+          ],
+          "expect_baseline_unchanged": true
+        },
+        {
+          "id": "known_then",
+          "query": "What was my employer known at January 15, 2026?",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "I work at Birch."
+          ],
+          "forbidden": [
+            "I work at Maple."
+          ],
+          "expect_baseline_unchanged": true
+        }
+      ]
+    },
+    {
+      "id": "ordinary_controls",
+      "category": "ordinary",
+      "sources": [
+        {
+          "id": "tea",
+          "content": "I prefer jasmine tea.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "tea",
+          "oracle_facts": []
+        },
+        {
+          "id": "color",
+          "content": "The notebook cover is green.",
+          "date": "2026-02-01",
+          "role": "user",
+          "session": "color",
+          "oracle_facts": []
+        }
+      ],
+      "questions": [
+        {
+          "id": "tea",
+          "query": "Tell me about jasmine tea.",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "I prefer jasmine tea."
+          ],
+          "expect_base_response": true,
+          "expect_baseline_unchanged": true
+        },
+        {
+          "id": "notebook",
+          "query": "What color is the notebook cover?",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "The notebook cover is green."
+          ],
+          "expect_base_response": true,
+          "expect_baseline_unchanged": true
+        },
+        {
+          "id": "config",
+          "query": "How do I change the summary budget?",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "expect_base_response": true
+        }
+      ]
+    }
+  ]
+}

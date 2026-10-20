@@ -14,6 +14,8 @@ import tiktoken
 from app.governance.models import (Chunk, Evidence, Fact, IndexBatch, IndexBatchDraft,
                                    Source, SourceStatus, ValidatedIndexBatch)
 from app.governance.registry import property_spec
+from app.governance.attribution import has_self_support
+from app.governance.time_support import mask_calendar_dates, supported_day
 
 
 class FactIndexError(RuntimeError):
@@ -148,6 +150,8 @@ class FactIndexer:
         after = chunk.source.content[end:]
         # 检查同一语句的限定条件，防止只摘录一个无条件片段。
         sentence = re.split(r"[.!?。！？\n]", before)[-1] + quote + re.split(r"[.!?。！？\n]", after)[0]
+        qualifier_sentence = mask_calendar_dates(sentence)
+        qualifier_quote = mask_calendar_dates(quote)
         plans = r"\b(plan(?:ning)? to|intend to|will|going to|want to|hope to|might|may)\b|计划|打算|将要|准备|想要|希望"
         conditions = r"\b(if|unless|provided that|hypothetically)\b|如果|假设|除非|前提|仅当"
         uncertain = r"\b(maybe|perhaps|possibly|not sure)\b|可能|或许|不确定|据说"
@@ -155,16 +159,16 @@ class FactIndexer:
         normative_rule = (kind == "rule" and property_spec(item["predicate"]).key == "rules"
                           and re.search(r"\b(rule|policy|must|shall|required|allow|prohibit|exception|do not|never)\b|规则|规定|必须|不得|允许|政策|制度|例外|不要|禁止", sentence, re.I))
         if not normative_rule:
-            if re.search(plans, sentence, re.I) and modality == "asserted":
+            if re.search(plans, qualifier_sentence, re.I) and modality == "asserted":
                 raise ValueError("PlanMisclassified")
-            if re.search(conditions, sentence, re.I) and modality != "hypothetical":
+            if re.search(conditions, qualifier_sentence, re.I) and modality != "hypothetical":
                 raise ValueError("ConditionMisclassified")
-            if re.search(uncertain, sentence, re.I) and modality == "asserted":
+            if re.search(uncertain, qualifier_sentence, re.I) and modality == "asserted":
                 raise ValueError("UncertaintyMisclassified")
-        if polarity == "positive" and re.search(negative, sentence, re.I):
+        if polarity == "positive" and re.search(negative, qualifier_sentence, re.I):
             raise ValueError("NegationMisclassified")
         for pattern in (plans, conditions, uncertain, negative):
-            if re.search(pattern, sentence, re.I) and not re.search(pattern, quote, re.I):
+            if re.search(pattern, qualifier_sentence, re.I) and not re.search(pattern, qualifier_quote, re.I):
                 raise ValueError("OmittedQualification")
         subject = item["subject"].strip()
         identity = item.get("identity_context", "")
@@ -173,9 +177,7 @@ class FactIndexer:
         if subject == "self":
             if chunk.source.role != "user" or not re.search(r"\b(I|my|me|we|our)\b|我", quote, re.I):
                 raise ValueError("UngroundedSubject")
-            attribution = re.split(r"[.!?。！？\n]", before)[-1]
-            if (re.search(r"\b(said|says|wrote|told)\b|说|表示|写道", attribution, re.I)
-                    and not re.search(r"\bI\s+(said|say|wrote|told)\b|我(?:说|表示|写道)", attribution, re.I)):
+            if not has_self_support(chunk.source.content, start, end, value):
                 raise ValueError("ReportedSpeakerIsNotSelf")
             subject_id = "self"
         else:
@@ -231,14 +233,15 @@ class FactIndexer:
             if raw_date is None:
                 dates.append(None)
                 continue
-            if (not isinstance(raw_date, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw_date)
-                    or not isinstance(time_quote, str) or chunk.text.count(time_quote) != 1
-                    or raw_date not in time_quote):
+            if not isinstance(time_quote, str) or not time_quote or chunk.text.count(time_quote) != 1:
                 raise ValueError("UngroundedDate")
-            if chunk.start + chunk.text.index(time_quote) < header_end:
+            time_start = chunk.start + chunk.text.index(time_quote)
+            if time_start < header_end:
                 raise ValueError("DisplayTimestampIsNotEffectiveDate")
-            when = datetime.strptime(raw_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            dates.append(int(when.timestamp() * 1000))
+            dates.append(supported_day(raw_date=raw_date, key=key, content=chunk.source.content,
+                                       quote_start=start, quote_end=end, time_start=time_start,
+                                       time_end=time_start + len(time_quote), value=value,
+                                       subject=subject, source_time=chunk.source.timestamp))
         if dates[0] is not None and dates[1] is not None and dates[1] <= dates[0]:
             raise ValueError("InvalidInterval")
         if any(d is not None for d in dates):
