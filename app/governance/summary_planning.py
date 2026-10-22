@@ -6,6 +6,7 @@ import re
 
 from app.governance.planning import contains, non_recall_request, plan as governance_plan, task_text
 from app.governance.registry import PROPERTIES
+from app.governance.task_requirements import memory_task_text, procedure_request, task_requirements
 
 
 @dataclass(frozen=True)
@@ -13,6 +14,9 @@ class SummaryRequirement:
     key: str
     label: str
     trigger: str
+    terms: tuple[str, ...] = ()
+    mandatory: bool = False
+    kind: str = 'facet'
 
 
 @dataclass(frozen=True)
@@ -32,6 +36,7 @@ class SummaryPlan:
     predicates: frozenset[str] = frozenset()
     focus_terms: tuple[str, ...] = ()
     order_basis: str = 'observation'  # observation | event | message
+    procedure_requirements: tuple[SummaryRequirement, ...] = ()
 
 
 FACETS = {
@@ -57,9 +62,12 @@ def mentioned_projects(text):
 
 
 def build_summary_plan(query, snapshot, *, reference=None, window=None):
-    task = task_text(query)
+    task = memory_task_text(task_text(query))
     if non_recall_request(task) or re.search(r"\b(?:do not|don't|never)\s+(?:summari[sz]e|recap)|(?:不要|无需|不必)(?:进行)?(?:总结|概括|回顾)", task, re.I):
         return SummaryPlan()
+    dependencies = tuple(SummaryRequirement(r.key, r.label, r.trigger, r.terms, r.mandatory, r.kind)
+                         for r in task_requirements(task))
+    procedure_signal = next((r for r in dependencies if r.kind == 'procedure'), None) if procedure_request(task) else None
     signal = re.search(r'\b(?:summari[sz]e|recap|synthesi[sz]e)\b|'
                        r'\b(?:give|provide|create|make)\b[^.?!\n]{0,35}\b(?:summary|overview|recap)\b|'
                        r'总结|概括|摘要|概览|梳理|回顾', task, re.I)
@@ -82,7 +90,7 @@ def build_summary_plan(query, snapshot, *, reference=None, window=None):
                               r'\b(?:order|sequence)\s+of\s+(?:(?:the|my|our|these|those)\s+)?(?:discussions?|mentions?)\b|'
                               r'(?:提及|提到|讨论).*(?:顺序|先后)|(?:顺序|先后).*(?:提及|提到|讨论)', task, re.I)
     signal = signal or across or report or listing or comparison or chronological or mention_order
-    if not signal:
+    if not signal and not procedure_signal:
         return SummaryPlan()
     # 材料日期不能收缩为检索窗口。只在请求文本未被剥离时复用 V3 的窗口。
     p = governance_plan(task, snapshot, reference=reference, window=window if task == query.strip() else None)
@@ -99,8 +107,9 @@ def build_summary_plan(query, snapshot, *, reference=None, window=None):
     order_request = mention_order or chronological
     if order_request and not any(r.key == 'timeline' for r in requirements):
         requirements.append(SummaryRequirement('timeline', FACETS['timeline'][0], order_request[0]))
-    if not requirements:
+    if not requirements and signal:
         requirements = [SummaryRequirement('overview', '相关经历', signal[0])]
+    requirements.extend(dependencies)
     predicates = p.predicates - {'event', 'rules'}
     slots = frozenset(f.slot for f in snapshot.facts if
         (not scopes or any(contains(f.scope, s) or contains(f.subject_name, s) for s in scopes))
@@ -121,14 +130,22 @@ def build_summary_plan(query, snapshot, *, reference=None, window=None):
                        'earlier later original chronology chronological temporal order timeline for about over across '
                        'conversations from to between on after before during as at since until january february march '
                        'april may june july august september october november december'.split())
-            terms = tuple(dict.fromkeys(t for t in re.findall(r'[A-Za-z][\w-]*', match[1]) if t.casefold() not in stop))
+            topic = re.split(r'\b(?:include|including|retain|preserve)\b', match[1], maxsplit=1, flags=re.I)[0]
+            if procedure_signal:
+                topic = re.split(r'\b(?:using|according to|following|with)\b', topic, maxsplit=1, flags=re.I)[0]
+            terms = tuple(dict.fromkeys(t for t in re.findall(r'[A-Za-z][\w-]*', topic) if t.casefold() not in stop))
         chinese = re.search(r'(?:总结|概括|梳理|回顾)(?:一下)?(?:我的|我们的)?([^，。；\n]+)', task)
         if chinese and not global_request and not terms:
-            topic = re.sub(r'(?:的)?(?:经历|历程|历史|记录|讨论|情况)$', '', chinese[1]).strip()
+            topic = re.split(r'(?:使用|按照|根据|保留|包括|包含)', chinese[1], maxsplit=1)[0]
+            topic = re.sub(r'(?:的)?(?:经历|历程|历史|记录|讨论|情况)$', '', topic).strip()
             if topic and topic not in ('全部', '所有', '整体', '全局'):
                 terms = (topic,)
         if terms and not any(contains(s.content, t) for s in snapshot.sources.values() for t in terms):
             return SummaryPlan(warnings=('unrecognized_scope',))
+        if not terms and not global_request and procedure_signal:
+            # Procedure-only requests do not authorize scanning unrelated history.
+            terms = tuple(dict.fromkeys(t for r in dependencies for t in r.terms))
+            slots = frozenset()
     order = 'chronological' if across or order_request or comparison or any(r.key == 'changes' for r in requirements) else 'source'
     order_basis = 'message' if mention_order else ('event' if chronological else 'observation')
     constraints = tuple(m[0] for m in re.finditer(r'(?:保留|包括|包含|不得|不要)[^。；\n]+|'
@@ -136,4 +153,5 @@ def build_summary_plan(query, snapshot, *, reference=None, window=None):
     warnings = ('身份待确认：同名主体分开展示，不推断跨会话为同一身份',) if p.ambiguous_identity else ()
     return SummaryPlan(True, task, tuple(sorted(scopes)), slots, not scopes and not predicates and not terms,
                        tuple(requirements), p.reference if p.reference is not None else reference,
-                       p.window, p.knowledge_cutoff, warnings, order, constraints, frozenset(predicates), terms, order_basis)
+                       p.window, p.knowledge_cutoff, warnings, order, constraints, frozenset(predicates), terms, order_basis,
+                       dependencies)

@@ -10,6 +10,10 @@ from app.governance.models import Evidence
 from app.governance.planning import contains
 from app.governance.resolution import StateResolver
 from app.governance.summary_planning import FACETS, SummaryRequirement, mentioned_projects
+from app.governance.procedural import (
+    has_procedure_body, procedural_groups, procedure_role_allowed, procedure_scope_allowed,
+    requirement_matches, rule_fact, source_scope_context,
+)
 
 
 @dataclass(frozen=True)
@@ -181,34 +185,81 @@ def continuation_parents(view, summary_plan):
 def collect_summary(snapshot, summary_plan):
     resolver = StateResolver()
     view = resolver.knowledge_view(snapshot, summary_plan.knowledge_cutoff)
-    current = resolver.state_at(view, summary_plan.slots, summary_plan.reference)
-    history = resolver.history_until(view, summary_plan.slots, summary_plan.reference)
-    current_ids = {f.id for f in current.selected}
-    history_ids = {f.id for f in history.selected}
-    conflict_ids = {fid for group in current.conflicts for fid in group}
     by_source = {}
     values_by_slot = {}
     for fact in view.facts:
         if fact.evidence and all(valid_evidence(e, view) for e in fact.evidence):
             by_source.setdefault(fact.source_id, []).append(fact)
             values_by_slot.setdefault(fact.slot, set()).add(fact.value.casefold())
+    needs = tuple(getattr(summary_plan, 'procedure_requirements', ()))
+    procedures = tuple(r for r in needs if r.kind == 'procedure')
+    session_projects, known_projects = source_scope_context(view) if procedures else ({}, set())
+    prepared_groups = {}
+    procedure_slots = {r.key: set() for r in procedures}
+    procedure_fact_ids = {r.key: set() for r in procedures}
+    if needs:
+        for source in view.sources.values():
+            facts = by_source.get(source.id, ())
+            groups = procedural_groups(source, source_groups(source, facts), needs)
+            prepared_groups[source.id] = groups
+            for primary, context in groups:
+                spans = (*context, primary)
+                text = '\n'.join(ev.quote for ev in spans)
+                linked = [f for f in facts if any(e.source_id == source.id and e.start < span.end and e.end > span.start
+                                                 for e in f.evidence for span in spans)]
+                if not procedure_scope_allowed(text, source, summary_plan, linked,
+                        session_projects=session_projects.get(source.session_id, ()), known_projects=known_projects):
+                    continue
+                for req in procedures:
+                    if procedure_role_allowed(source, req) and has_procedure_body(primary, context, req):
+                        procedure_slots[req.key].update(f.slot for f in linked if rule_fact(f))
+                        procedure_fact_ids[req.key].update(f.id for f in linked if rule_fact(f))
+        # A multi-valued rules slot may contain independent procedures. Resolve
+        # its complete state, but follow only encoded version/support relations
+        # to nominate unnamed successor versions of the requested procedure.
+        for req in procedures:
+            changed = True
+            while changed:
+                changed = False
+                for rel in view.relations:
+                    if rel.relation not in ('corrects', 'retracts', 'changes', 'supports', 'conflicts'):
+                        continue
+                    if {rel.older, rel.newer} & procedure_fact_ids[req.key]:
+                        previous = len(procedure_fact_ids[req.key])
+                        procedure_fact_ids[req.key].update((rel.older, rel.newer))
+                        changed |= len(procedure_fact_ids[req.key]) != previous
+    # Select complete rule slots, including versions whose correction no longer
+    # repeats the template name. StateResolver remains the only update policy.
+    slots = summary_plan.slots | frozenset(slot for values in procedure_slots.values() for slot in values)
+    current = resolver.state_at(view, slots, summary_plan.reference)
+    history = resolver.history_until(view, slots, summary_plan.reference)
+    current_ids = {f.id for f in current.selected}
+    history_ids = {f.id for f in history.selected}
+    conflict_ids = {fid for group in current.conflicts for fid in group}
     updates = tuple(e for e in history.update_evidence if e.purpose == 'update' and valid_evidence(e, view))
     parents = continuation_parents(view, summary_plan)
     order_basis = getattr(summary_plan, 'order_basis', 'observation')
     items = []
     for source in view.sources.values():
         facts = by_source.get(source.id, ())
-        if summary_plan.scopes and not (any(contains(source.content, s) for s in summary_plan.scopes)
+        if not procedures and summary_plan.scopes and not (any(contains(source.content, s) for s in summary_plan.scopes)
                 or any(f.slot in summary_plan.slots for f in facts) or source.id in parents):
             continue
         projects_in_source = mentioned_projects(source.content)
         in_scope = source.id in parents or bool(summary_plan.scopes and len(projects_in_source) <= 1
                                                 and any(contains(source.content, s) for s in summary_plan.scopes))
-        for ev, context in source_groups(source, facts):
+        for ev, context in prepared_groups.get(source.id, ()) if needs else source_groups(source, facts):
             group_spans = (*context, ev)
             scope_text = '\n'.join(e.quote for e in group_spans)
             linked = [f for f in facts if any(e.source_id == source.id and e.start < span.end and e.end > span.start
                                              for e in f.evidence for span in group_spans)]
+            procedural_matches = tuple(r for r in procedures if procedure_role_allowed(source, r) and (
+                has_procedure_body(ev, context, r)
+                or any(f.id in procedure_fact_ids[r.key] for f in linked if rule_fact(f))))
+            if procedural_matches and not procedure_scope_allowed(scope_text, source, summary_plan, linked,
+                    session_projects=session_projects.get(source.session_id, ()), known_projects=known_projects):
+                continue
+            normal_scope = True
             if summary_plan.scopes:
                 explicit_projects = mentioned_projects(ev.quote)
                 projects = explicit_projects or mentioned_projects(scope_text)
@@ -218,10 +269,12 @@ def collect_summary(snapshot, summary_plan):
                         or not explicit_projects and any(contains(scope_text, s) for s in summary_plan.scopes)):
                     in_scope = True
                 if not in_scope and not any(f.slot in summary_plan.slots for f in linked):
-                    continue
+                    normal_scope = False
             elif not summary_plan.global_scope and not (
                     summary_plan.predicates and any(f.slot in summary_plan.slots for f in linked)
                     or any(contains(scope_text, t) for t in summary_plan.focus_terms)):
+                normal_scope = False
+            if not normal_scope and not procedural_matches:
                 continue
             is_update = any(e.source_id == source.id and e.start < ev.end and e.end > ev.start for e in updates)
             if order_basis == 'event':
@@ -252,6 +305,17 @@ def collect_summary(snapshot, summary_plan):
                     continue
             facets = {k for k, (_, pattern) in FACETS.items() if re.search(pattern, scope_text, re.I)}
             facets.add('overview')
+            applicable_procedure = False
+            matched_rule_facts = [f for f in linked if rule_fact(f)]
+            for req in procedural_matches:
+                # Raw definitions remain usable, explicitly unverified evidence.
+                # A known invalid rule never returns through that raw fallback.
+                relevant_rules = [f for f in matched_rule_facts if f.id in procedure_fact_ids[req.key]]
+                if not matched_rule_facts or any(f.id in current_ids and f.id not in conflict_ids for f in relevant_rules):
+                    facets.add(req.key)
+                    applicable_procedure = True
+            if normal_scope:
+                facets.update(r.key for r in needs if r.kind == 'explicit' and requirement_matches(scope_text, r))
             if moments and order_basis in ('event', 'message'):
                 facets.add('timeline')
             if linked:
@@ -267,6 +331,10 @@ def collect_summary(snapshot, summary_plan):
                     facets.add('decisions')
             labels = []
             dependencies = []
+            if procedural_matches and matched_rule_facts and not applicable_procedure:
+                labels.append('程序性材料不可作为当前执行规则；保留版本诊断依据')
+            elif procedural_matches and not matched_rule_facts:
+                labels.append('程序性原文；适用性待核验，不自动视为当前有效指令')
             if order_basis == 'event' and not moments:
                 labels.append('已知日期的更新/非确认记录；不推断事件先后' if filter_moments else
                               '事件日期未知；仅保留来源位置，不推断事件先后')
@@ -274,6 +342,11 @@ def collect_summary(snapshot, summary_plan):
                 labels.append('消息日期未知；不推断提及先后')
             for f in linked:
                 location = f'{f.evidence[0].start}-{f.evidence[0].end}'
+                if procedural_matches and rule_fact(f):
+                    # Separate assertion, update, condition and time spans are
+                    # one procedure dependency, even when only one matched the
+                    # query name. Do not expose a replacement without its basis.
+                    dependencies.extend(f.evidence)
                 if f.id in conflict_ids:
                     state = '冲突待确认'
                 elif f.id in current_ids:
@@ -287,6 +360,11 @@ def collect_summary(snapshot, summary_plan):
                             dependencies.extend(e for e in rel.evidence if e.purpose == 'update' and valid_evidence(e, view))
                 else:
                     state = f'非确认状态({f.modality}/{f.polarity})'
+                if procedural_matches and f.id in current.excluded and current.excluded[f.id] != 'duplicate_support':
+                    state = f'非当前执行规则({current.excluded[f.id]})'
+                    for rel in view.relations:
+                        if rel.older == f.id and rel.relation in ('corrects', 'retracts', 'changes'):
+                            dependencies.extend(e for e in rel.evidence if e.purpose == 'update' and valid_evidence(e, view))
                 labels.append(f'{location}:{state};归因:{f.subject_name};主体:{f.subject_id}')
                 if f.valid_from is not None:
                     labels.append('明确有效日:' + date_text(f.valid_from))

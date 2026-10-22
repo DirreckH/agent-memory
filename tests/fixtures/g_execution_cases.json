@@ -1,0 +1,778 @@
+{
+  "authorship": "Independently authored synthetic development cases for G execution support. All extraction drafts and expected evidence are declared in advance; no platform questions, logs or hidden answers. Passing complete-clause and provenance checks is not final-answer correctness.",
+  "protection_baseline": "f97629b9a9e3b4712ba6a5850906a796f286c8a7",
+  "historical_G_baseline": "f930ac62b730b4cd6cd558cd412b0136d3c4437b",
+  "scenarios": [
+    {
+      "id": "global_template",
+      "split": "development",
+      "category": "G synthetic execution support",
+      "sources": [
+        {
+          "id": "template",
+          "content": "Our agreed response template is a JSON object with exactly the keys action and owner. Never add prose.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "template",
+          "oracle_facts": []
+        },
+        {
+          "id": "decision",
+          "content": "Project Helix decision: retain owner review before release; Mira owns this review.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "decision",
+          "oracle_facts": []
+        },
+        {
+          "id": "wrong",
+          "content": "Project Quartz response template requires an XML document with a debug field.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "wrong",
+          "oracle_facts": []
+        }
+      ],
+      "questions": [
+        {
+          "id": "apply",
+          "query": "List project Helix decisions using our agreed response template.",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "Our agreed response template is a JSON object with exactly the keys action and owner. Never add prose.",
+            "Project Helix decision: retain owner review before release; Mira owns this review."
+          ],
+          "gold": {
+            "answer": "{\"action\":\"retain owner review before release\",\"owner\":\"Mira\"}",
+            "reason": "The request explicitly applies the shared template; its lack of a project name is not evidence of irrelevance. Quartz is a different project.",
+            "atoms": [
+              {
+                "claim": "complete learned template",
+                "support": [
+                  {
+                    "source_id": "template",
+                    "quote": "Our agreed response template is a JSON object with exactly the keys action and owner. Never add prose."
+                  }
+                ]
+              },
+              {
+                "claim": "project action and owner",
+                "support": [
+                  {
+                    "source_id": "decision",
+                    "quote": "Project Helix decision: retain owner review before release; Mira owns this review."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [],
+            "distractors": []
+          },
+          "forbidden_sources": [
+            "wrong"
+          ],
+          "answer_probe": true
+        }
+      ]
+    },
+    {
+      "id": "global_scoring",
+      "split": "development",
+      "category": "G synthetic execution support",
+      "sources": [
+        {
+          "id": "formula",
+          "content": "The scoring rule I taught you is 2 times safety plus 3 times reversibility. Show the arithmetic; a higher score is better.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "formula",
+          "oracle_facts": []
+        },
+        {
+          "id": "initial",
+          "content": "Project Linden initial plan: manual release; safety is 2 and reversibility is 1.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "initial",
+          "oracle_facts": []
+        },
+        {
+          "id": "final",
+          "content": "Project Linden final plan: staged release; safety is 3 and reversibility is 2.",
+          "date": "2026-02-01",
+          "role": "user",
+          "session": "final",
+          "oracle_facts": []
+        },
+        {
+          "id": "other",
+          "content": "Project Marble scoring rule: safety has weight 9 and reversibility has weight 0.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "other",
+          "oracle_facts": []
+        }
+      ],
+      "questions": [
+        {
+          "id": "apply",
+          "query": "Compare the initial and final plans for project Linden using the scoring rule I taught you.",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "The scoring rule I taught you is 2 times safety plus 3 times reversibility. Show the arithmetic; a higher score is better.",
+            "Project Linden initial plan: manual release; safety is 2 and reversibility is 1.",
+            "Project Linden final plan: staged release; safety is 3 and reversibility is 2."
+          ],
+          "gold": {
+            "answer": "Initial: 2*2+3*1=7. Final: 2*3+3*2=12. The final plan scores 5 points higher.",
+            "reason": "Weights and direction come from the learned rule, while the project sources provide operands. Other-project weights do not apply.",
+            "atoms": [
+              {
+                "claim": "complete scoring rule",
+                "support": [
+                  {
+                    "source_id": "formula",
+                    "quote": "The scoring rule I taught you is 2 times safety plus 3 times reversibility. Show the arithmetic; a higher score is better."
+                  }
+                ]
+              },
+              {
+                "claim": "initial operands",
+                "support": [
+                  {
+                    "source_id": "initial",
+                    "quote": "Project Linden initial plan: manual release; safety is 2 and reversibility is 1."
+                  }
+                ]
+              },
+              {
+                "claim": "final operands",
+                "support": [
+                  {
+                    "source_id": "final",
+                    "quote": "Project Linden final plan: staged release; safety is 3 and reversibility is 2."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [],
+            "distractors": []
+          },
+          "forbidden_sources": [
+            "other"
+          ],
+          "answer_probe": true
+        }
+      ]
+    },
+    {
+      "id": "mixed_recall_advice",
+      "split": "development",
+      "category": "G synthetic execution support",
+      "sources": [
+        {
+          "id": "rule",
+          "content": "Project Cedar rule: release requires two approvals.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "rule",
+          "oracle_facts": []
+        },
+        {
+          "id": "exception",
+          "content": "Project Cedar exception: emergency repairs need one security signatory, and that signatory must record the reason.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "exception",
+          "oracle_facts": []
+        },
+        {
+          "id": "wrong",
+          "content": "Project Ash permits release without approval.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "wrong",
+          "oracle_facts": []
+        }
+      ],
+      "questions": [
+        {
+          "id": "recall_then_apply",
+          "query": "Summarize project Cedar rules. Recommend a next action using those rules.",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "Project Cedar rule: release requires two approvals.",
+            "Project Cedar exception: emergency repairs need one security signatory, and that signatory must record the reason."
+          ],
+          "gold": {
+            "answer": "Require two approvals normally; for an emergency repair, obtain one security signatory and record the reason before releasing.",
+            "reason": "Advice follows a required recall step; both the exception and its documentation condition must survive.",
+            "atoms": [
+              {
+                "claim": "normal release condition",
+                "support": [
+                  {
+                    "source_id": "rule",
+                    "quote": "Project Cedar rule: release requires two approvals."
+                  }
+                ]
+              },
+              {
+                "claim": "complete emergency exception",
+                "support": [
+                  {
+                    "source_id": "exception",
+                    "quote": "Project Cedar exception: emergency repairs need one security signatory, and that signatory must record the reason."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [],
+            "distractors": []
+          },
+          "forbidden_sources": [
+            "wrong"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "configuration_recall",
+      "split": "development",
+      "category": "G synthetic execution support",
+      "sources": [
+        {
+          "id": "check",
+          "content": "Project Alder rule: set release checks to strict.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "check",
+          "oracle_facts": []
+        },
+        {
+          "id": "audit",
+          "content": "Project Alder rule: retain an audit log for every release, including emergency releases.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "audit",
+          "oracle_facts": []
+        }
+      ],
+      "questions": [
+        {
+          "id": "configure",
+          "query": "How do I configure the release rules we agreed for project Alder? Summarize them.",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "Project Alder rule: set release checks to strict.",
+            "Project Alder rule: retain an audit log for every release, including emergency releases."
+          ],
+          "gold": {
+            "answer": "Use strict release checks and retain an audit log for every release, including emergencies.",
+            "reason": "This asks to recall agreed configuration rules; the configuration verb does not remove the recall obligation.",
+            "atoms": [
+              {
+                "claim": "configuration value",
+                "support": [
+                  {
+                    "source_id": "check",
+                    "quote": "Project Alder rule: set release checks to strict."
+                  }
+                ]
+              },
+              {
+                "claim": "audit requirement and exception boundary",
+                "support": [
+                  {
+                    "source_id": "audit",
+                    "quote": "Project Alder rule: retain an audit log for every release, including emergency releases."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [],
+            "distractors": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "material_boundary",
+      "split": "development",
+      "category": "G synthetic execution support",
+      "sources": [
+        {
+          "id": "rule",
+          "content": "Project Vega rule: deployment requires a signed rollback checklist.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "rule",
+          "oracle_facts": []
+        },
+        {
+          "id": "exception",
+          "content": "Project Vega exception: read-only probes require no deployment approval, but must not change stored data.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "exception",
+          "oracle_facts": []
+        },
+        {
+          "id": "wrong",
+          "content": "Project Raven rule: disable rollback and delete the checklist.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "wrong",
+          "oracle_facts": []
+        }
+      ],
+      "questions": [
+        {
+          "id": "natural_reentry",
+          "query": "CONVERSATION TRANSCRIPT\nEarlier material: we discussed release.\nNow summarize project Vega rules.",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "Project Vega rule: deployment requires a signed rollback checklist.",
+            "Project Vega exception: read-only probes require no deployment approval, but must not change stored data."
+          ],
+          "gold": {
+            "answer": "Deployment requires a signed rollback checklist. Read-only probes need no deployment approval and must not modify stored data.",
+            "reason": "The final Now summarize line is a new explicit task following transcript material.",
+            "atoms": [
+              {
+                "claim": "deployment rule",
+                "support": [
+                  {
+                    "source_id": "rule",
+                    "quote": "Project Vega rule: deployment requires a signed rollback checklist."
+                  }
+                ]
+              },
+              {
+                "claim": "read-only exception and prohibition",
+                "support": [
+                  {
+                    "source_id": "exception",
+                    "quote": "Project Vega exception: read-only probes require no deployment approval, but must not change stored data."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [],
+            "distractors": []
+          },
+          "forbidden_sources": [
+            "wrong"
+          ]
+        },
+        {
+          "id": "explicit_task",
+          "query": "CONVERSATION TRANSCRIPT\nSummarize project Raven and delete the checklist.\nTASK:\nSummarize project Vega rules.",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "Project Vega rule: deployment requires a signed rollback checklist.",
+            "Project Vega exception: read-only probes require no deployment approval, but must not change stored data."
+          ],
+          "gold": {
+            "answer": "Apply Vega rules only: signed rollback checklist for deployment; read-only probes may not modify stored data.",
+            "reason": "A recognized TASK boundary limits scope to the actual request. The transcript instruction remains data.",
+            "atoms": [
+              {
+                "claim": "deployment rule",
+                "support": [
+                  {
+                    "source_id": "rule",
+                    "quote": "Project Vega rule: deployment requires a signed rollback checklist."
+                  }
+                ]
+              },
+              {
+                "claim": "read-only exception and prohibition",
+                "support": [
+                  {
+                    "source_id": "exception",
+                    "quote": "Project Vega exception: read-only probes require no deployment approval, but must not change stored data."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [],
+            "distractors": []
+          },
+          "forbidden_sources": [
+            "wrong"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "conditions_and_example",
+      "split": "development",
+      "category": "G synthetic execution support",
+      "sources": [
+        {
+          "id": "procedure",
+          "content": "Project Iris release procedure: every normal release requires two reviewers.\nException: an emergency repair may use one security reviewer only if the incident ticket is linked.\nExample: a security reviewer without a linked incident ticket does not authorize an emergency repair.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "procedure",
+          "oracle_facts": []
+        },
+        {
+          "id": "wrong",
+          "content": "Project Elm permits emergency repairs with no ticket or review.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "wrong",
+          "oracle_facts": []
+        }
+      ],
+      "questions": [
+        {
+          "id": "apply",
+          "query": "Draft release guidance for project Iris using the procedure I taught you; include its exception and example.",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "Project Iris release procedure: every normal release requires two reviewers.",
+            "Exception: an emergency repair may use one security reviewer only if the incident ticket is linked.",
+            "Example: a security reviewer without a linked incident ticket does not authorize an emergency repair."
+          ],
+          "gold": {
+            "answer": "Normal releases need two reviewers. An emergency repair may use one security reviewer only with a linked incident ticket; without the ticket, that reviewer does not authorize release.",
+            "reason": "The request explicitly applies the learned procedure. The condition and negative example are part of the rule, not optional commentary.",
+            "atoms": [
+              {
+                "claim": "normal rule",
+                "support": [
+                  {
+                    "source_id": "procedure",
+                    "quote": "Project Iris release procedure: every normal release requires two reviewers."
+                  }
+                ]
+              },
+              {
+                "claim": "conditional exception",
+                "support": [
+                  {
+                    "source_id": "procedure",
+                    "quote": "Exception: an emergency repair may use one security reviewer only if the incident ticket is linked."
+                  }
+                ]
+              },
+              {
+                "claim": "negative example",
+                "support": [
+                  {
+                    "source_id": "procedure",
+                    "quote": "Example: a security reviewer without a linked incident ticket does not authorize an emergency repair."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [],
+            "distractors": []
+          },
+          "forbidden_sources": [
+            "wrong"
+          ],
+          "answer_probe": true,
+          "dependencies": [
+            {
+              "id": "exception_needs_ticket_and_example",
+              "if_any": [
+                "may use one security reviewer"
+              ],
+              "support": [
+                {
+                  "source_id": "procedure",
+                  "quote": "Exception: an emergency repair may use one security reviewer only if the incident ticket is linked."
+                },
+                {
+                  "source_id": "procedure",
+                  "quote": "Example: a security reviewer without a linked incident ticket does not authorize an emergency repair."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rule_correction",
+      "split": "development",
+      "category": "G synthetic execution support",
+      "sources": [
+        {
+          "id": "old",
+          "content": "Project Mica rule: release requires two approvals.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "mica-policy",
+          "oracle_facts": [
+            {
+              "subject": "Mica",
+              "predicate": "rules",
+              "scope": "Mica",
+              "value": "two approvals",
+              "quote": "Project Mica rule: release requires two approvals.",
+              "kind": "rule"
+            }
+          ]
+        },
+        {
+          "id": "corrected",
+          "content": "Correction for project Mica: the rule requires one security approval; the earlier two approvals rule was a mistake.",
+          "date": "2026-02-01",
+          "role": "user",
+          "session": "mica-policy",
+          "oracle_facts": [
+            {
+              "subject": "Mica",
+              "predicate": "rules",
+              "scope": "Mica",
+              "value": "one security approval",
+              "quote": "Correction for project Mica: the rule requires one security approval; the earlier two approvals rule was a mistake.",
+              "kind": "rule",
+              "operation": "correct",
+              "target_value": "two approvals",
+              "update_quote": "Correction for project Mica: the rule requires one security approval; the earlier two approvals rule was a mistake."
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "apply",
+          "query": "Summarize the current rules for project Mica and apply the corrected release rule.",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "Correction for project Mica: the rule requires one security approval; the earlier two approvals rule was a mistake."
+          ],
+          "gold": {
+            "answer": "Require one security approval. Two approvals was a mistaken earlier statement, not a prior valid rule.",
+            "reason": "The explicit correction disqualifies the old rule as current or true historical policy; quoting the old statement requires its correction context.",
+            "atoms": [
+              {
+                "claim": "correction and replacement requirement",
+                "support": [
+                  {
+                    "source_id": "corrected",
+                    "quote": "Correction for project Mica: the rule requires one security approval; the earlier two approvals rule was a mistake."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [],
+            "distractors": []
+          },
+          "answer_probe": true,
+          "dependencies": [
+            {
+              "id": "old_rule_needs_correction",
+              "if_any": [
+                "Project Mica rule: release requires two approvals."
+              ],
+              "support": [
+                {
+                  "source_id": "corrected",
+                  "quote": "Correction for project Mica: the rule requires one security approval; the earlier two approvals rule was a mistake."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rule_retraction",
+      "split": "development",
+      "category": "G synthetic execution support",
+      "sources": [
+        {
+          "id": "old",
+          "content": "Project Opal rule: releases may bypass review during emergency repairs.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "opal-policy",
+          "oracle_facts": [
+            {
+              "subject": "Opal",
+              "predicate": "rules",
+              "scope": "Opal",
+              "value": "bypass review",
+              "quote": "Project Opal rule: releases may bypass review during emergency repairs.",
+              "kind": "rule"
+            }
+          ]
+        },
+        {
+          "id": "withdrawn",
+          "content": "Project Opal rule update: I retract the bypass review exception; it is withdrawn and no replacement rule is approved.",
+          "date": "2026-03-01",
+          "role": "user",
+          "session": "opal-policy",
+          "oracle_facts": [
+            {
+              "subject": "Opal",
+              "predicate": "rules",
+              "scope": "Opal",
+              "value": "bypass review",
+              "quote": "Project Opal rule update: I retract the bypass review exception; it is withdrawn and no replacement rule is approved.",
+              "kind": "rule",
+              "operation": "retract",
+              "target_value": "bypass review",
+              "update_quote": "Project Opal rule update: I retract the bypass review exception; it is withdrawn and no replacement rule is approved."
+            }
+          ]
+        },
+        {
+          "id": "wrong",
+          "content": "Project Ruby still allows emergency releases to bypass review.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "wrong",
+          "oracle_facts": []
+        }
+      ],
+      "questions": [
+        {
+          "id": "apply",
+          "query": "Summarize project Opal rules and tell me whether its emergency exception can still be applied.",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "Project Opal rule update: I retract the bypass review exception; it is withdrawn and no replacement rule is approved."
+          ],
+          "gold": {
+            "answer": "The bypass-review exception was withdrawn. No replacement rule is approved, so its use cannot be authorized from these memories.",
+            "reason": "Withdrawal does not restore the old exception or imply a replacement; a different project cannot supply one.",
+            "atoms": [
+              {
+                "claim": "withdrawal and absent replacement",
+                "support": [
+                  {
+                    "source_id": "withdrawn",
+                    "quote": "Project Opal rule update: I retract the bypass review exception; it is withdrawn and no replacement rule is approved."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [],
+            "distractors": []
+          },
+          "forbidden_sources": [
+            "wrong"
+          ],
+          "dependencies": [
+            {
+              "id": "old_exception_needs_withdrawal",
+              "if_any": [
+                "Project Opal rule: releases may bypass review during emergency repairs."
+              ],
+              "support": [
+                {
+                  "source_id": "withdrawn",
+                  "quote": "Project Opal rule update: I retract the bypass review exception; it is withdrawn and no replacement rule is approved."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tight_budget",
+      "split": "development",
+      "category": "G synthetic execution support",
+      "sources": [
+        {
+          "id": "rule",
+          "content": "Project Flint decision: release requires owner approval.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "rule",
+          "oracle_facts": []
+        }
+      ],
+      "questions": [
+        {
+          "id": "apply",
+          "query": "List the decisions for project Flint.",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "required": [
+            "Project Flint decision: release requires owner approval."
+          ],
+          "gold": {
+            "answer": "Release requires owner approval.",
+            "reason": "A complete short source fits the 128-token caller budget; neither an empty packet nor a truncated condition is adequate.",
+            "atoms": [
+              {
+                "claim": "complete short decision",
+                "support": [
+                  {
+                    "source_id": "rule",
+                    "quote": "Project Flint decision: release requires owner approval."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [],
+            "distractors": []
+          },
+          "recommended_budget": 128
+        }
+      ]
+    },
+    {
+      "id": "pure_advice",
+      "split": "development",
+      "category": "G synthetic execution support",
+      "sources": [
+        {
+          "id": "background",
+          "content": "Project Willow previously used a manual review queue.",
+          "date": "2026-01-01",
+          "role": "user",
+          "session": "background",
+          "oracle_facts": []
+        }
+      ],
+      "questions": [
+        {
+          "id": "ordinary",
+          "query": "Recommend a general way to organize a new project.",
+          "as_of": "2026-10-01",
+          "top_k": 1,
+          "gold": {
+            "answer": "Offer general advice without claiming that a learned project-specific procedure was requested.",
+            "reason": "This is pure advice with no explicit memory-application request; preserve the ordinary baseline response and model calls.",
+            "atoms": [
+              {
+                "claim": "available background only",
+                "support": [
+                  {
+                    "source_id": "background",
+                    "quote": "Project Willow previously used a manual review queue."
+                  }
+                ]
+              }
+            ],
+            "forbidden_claims": [],
+            "distractors": []
+          },
+          "expect_base_response": true,
+          "expect_baseline_unchanged": true
+        }
+      ]
+    }
+  ]
+}

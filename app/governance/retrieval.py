@@ -51,8 +51,9 @@ class GovernanceRetriever:
                 and self.summaries and self.versions and not self.preserve_only):
             summary_plan, outcome = self.summarize(snapshot, ctx)
             if summary_plan.applicable:
-                logger.info('F1 coverage emitted=%s omitted=%s missing=%s',
-                            len(outcome.emitted), len(outcome.omitted), len(outcome.missing))
+                logger.info('F1 coverage emitted=%s omitted=%s missing=%s selection=%s support_errors=%s',
+                    len(outcome.emitted), len(outcome.omitted), len(outcome.missing),
+                    outcome.selection, len(outcome.support_errors))
                 if ctx.settings.f1_mode == 'active':
                     # 已识别的时间/身份范围不能因缺证或预算不足而回退到范围外原文。
                     # 无完整可用证据时返回空结果；不生成只有标题的伪摘要。
@@ -64,11 +65,15 @@ class GovernanceRetriever:
         from app.governance.summary_planning import build_summary_plan
         from app.governance.summary_retrieval import collect_summary
         from app.governance.summary_assembly import assemble_summary, SummaryOutcome
+        from app.governance.summary_selection import select_summary_outcome
         summary_plan = build_summary_plan(ctx.query, snapshot, reference=ctx.reference, window=ctx.window)
         if not summary_plan.applicable:
             return summary_plan, SummaryOutcome()
-        outcome = assemble_summary(collect_summary(snapshot, summary_plan), summary_plan,
+        collection = collect_summary(snapshot, summary_plan)
+        outcome = assemble_summary(collection, summary_plan,
             ctx.baseline, snapshot, limit=ctx.limit, token_budget=ctx.settings.governance_content_tokens)
+        outcome = select_summary_outcome(collection, summary_plan, ctx.baseline, snapshot, outcome,
+            limit=ctx.limit, token_budget=ctx.settings.governance_content_tokens)
         return summary_plan, outcome
 
     def collect(self, snapshot, ctx, p):

@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import re
 
 from app.governance.registry import PROPERTIES, RELATION_ALIASES
+from app.governance.task_requirements import memory_task_text, quoted_procedure_term
 from app.temporal import TemporalWindow, resolve_relative_window
 from app.temporal_extraction import extract_temporal_rules
 
@@ -25,9 +26,18 @@ def relation_key(predicate):
 
 
 def task_text(query):
-    """Extract request sections without treating supplied material as query instructions."""
-    text = re.sub(r'```[\s\S]*?```|<(?P<tag>context|source|document|materials)>[\s\S]*?</(?P=tag)>',
+    """Recognize request sections; unmarked task/material boundaries remain heuristic."""
+    text = re.sub(r'```[\s\S]*?```|~~~[\s\S]*?~~~|<(?P<tag>context|source|document|materials)>[\s\S]*?</(?P=tag)>',
                   '', query, flags=re.I)
+    # Keep an unmatched code fence closed to the end of the supplied text.
+    lines = []
+    in_code = False
+    for line in text.splitlines():
+        if re.match(r'^\s*(?:`{3,}|~{3,})', line):
+            in_code = True
+        if not in_code:
+            lines.append(line)
+    text = '\n'.join(lines)
 
     def quoted_name(match):
         body = match[0][1:-1].strip()
@@ -38,12 +48,17 @@ def task_text(query):
         if re.fullmatch(rf'\d{{4}}(?:-\d{{1,2}})?|(?:{_MONTH})\.?\s+\d{{4}}|'
                        r'\d{4}\s*年(?:\s*\d{1,2}\s*月)?', body, re.I):
             return body  # Keep unsupported precision visible to the temporal guard.
+        if quoted_procedure_term(body):
+            return body
         if (re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,40}|[\u3400-\u9fff]{1,20}', body)
                 and not re.search(r'summar|recap|review|总结|概括|要求|指令|回顾', body, re.I)):
             return body
         return ''
 
     text = re.sub(r'"[^"\n]*"|“[^”\n]*”|「[^」\n]*」', quoted_name, text)
+    # A multiline quotation remains data even if it contains a request heading.
+    text = re.sub(r'"[^"\n]*\n[^"]*"|“[^”\n]*\n[^”]*”|「[^」\n]*\n[^」]*」', '', text)
+    text = re.sub(r'(?m)^[ \t]*["“「][^\n]*(?:\n[\s\S]*)?$', '', text)
     prefix = r'^\s*(?:#{1,6}\s*|[-=]{2,}\s*)?(?:\[)?'
     suffix = r'\s*(?:\]\s*[:：]?|[:：]|\s*$)'
     material = re.compile(prefix + r'(?:参考资料|材料|背景|上下文|引用|选项|'
@@ -51,14 +66,31 @@ def task_text(query):
                           r'(?:conversation\s+)?transcripts?|artifacts?|prior\s+outputs?)' + suffix, re.I)
     request = re.compile(prefix + r'(?:最终任务|任务|问题|请求|要求|(?:final\s+)?task|question|request|instructions)'
                          + suffix, re.I)
+    final_request = re.compile(prefix + r'(?:最终任务|最终请求|任务|问题|请求|要求|(?:final\s+)?(?:task|request|question))' + suffix, re.I)
+    transition = re.compile(r'^\s*(?:Now\s+(?:please\s+)?(?:summari[sz]e|recap|list|compare|apply|use|follow)\b|'
+                            r'现在(?:请)?(?:总结|概括|梳理|列出|比较|应用|使用|按照))', re.I)
     kept = []
     in_material = False
+    material_depth = 0
+    speaker_context = False
     for line in text.splitlines():
-        if request.match(line):
+        if re.match(r'^(?: {4}|\t)|^\s*>', line):
+            continue
+        if final_request.match(line) or (not in_material and request.match(line)):
             in_material = False
+            material_depth = 0
+            speaker_context = False
             kept.append(request.sub('', line, count=1))
+        elif in_material and material_depth == 1 and not speaker_context and transition.match(line):
+            # This narrow top-level convention recovers a trailing user task; it
+            # cannot authenticate arbitrary prose without structural boundaries.
+            in_material = False
+            kept.append(line)
         elif material.match(line):
             in_material = True
+            material_depth += 1
+        elif in_material and re.match(r'^\s*(?:user|assistant|system|developer|用户|助手)\s*[:：]', line, re.I):
+            speaker_context = True
         elif not in_material and not re.match(r'^\s*(?:>|[A-H][.)、]\s)', line):
             kept.append(re.split(r'(?:参考资料|参考材料|引用材料|以下材料|source material|reference material)\s*[:：]',
                                  line, maxsplit=1, flags=re.I)[0])
@@ -66,17 +98,8 @@ def task_text(query):
 
 
 def non_recall_request(query):
-    """Advice, counterfactuals and configuration instructions do not assert a memory lookup."""
-    return bool(re.search(
-        r'\b(?:what if|suppose|hypothetically|should I|should we|would I|would we)\b|'
-        r'\b(?:how (?:do|can|should) (?:I|we)|how to)\b[^.?!\n]*'
-        r'\b(?:change|set|configure|enable|disable|implement|adjust)\b|'
-        r'(?:^|[.!?]\s*)(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?'
-        r'(?:recommend|suggest|advise)\b|'
-        r'\b(?:give|provide|offer)\s+(?:me|us)\s+(?:some\s+)?(?:advice|recommendations?|suggestions?)\b|'
-        r'假如|假设|如果我|如果我们|(?:我|我们)(?:应该|该)|'
-        r'^(?:请)?(?:推荐|建议)|(?:给我|给我们)(?:一些|提供)?建议|如何(?:设置|修改|配置)',
-        query, re.I))
+    """Only exclude a task when no recall/application clause remains."""
+    return bool(query.strip()) and not memory_task_text(query).strip()
 
 
 _BROAD_ALIASES = frozenset({'position', 'like', 'live', 'living', 'company', 'progress'})
@@ -160,7 +183,9 @@ def plan(query, snapshot, *, reference=None, window=None, expansion=''):
     task = task_text(query)
     if task != query.strip():
         window = None  # A window inferred from material cannot constrain the actual task.
-    query = task
+    query = memory_task_text(task)
+    if query != task:
+        window = None  # A new-action date is not automatically a recall window.
     if non_recall_request(query):
         return QueryPlan()
     summary=re.search(_SUMMARY,query,re.I)
@@ -199,7 +224,8 @@ def plan(query, snapshot, *, reference=None, window=None, expansion=''):
                 or re.search(r'\b(?:except|not|since|until|approximately|around|about)\b|除外|以外|大约', query, re.I)):
             return QueryPlan(unresolved=('unsupported_date_operator',))
     if not dates and window is None:
-        temporal_text = re.sub(r'(?:之前|以前)(?:的)?(?:讨论|会话|记录|建议)|(?:之前|以前)关于', '', query)
+        temporal_text = re.sub(r'(?:之前|以前)(?:的)?(?:讨论|会话|记录|建议)|(?:之前|以前)关于|'
+                               r'(?:之前|以前)(?=(?:约定|教|商定|确定|定义|规定|用过))', '', query)
         if (re.search(r'\b(?:before|after|since|until)\b|之前|之后|以前|以后', temporal_text, re.I)
                 or relative and not rules.complete
                 or re.search(rf'\b(?:in|during|on|as of|known at|known by)\s+(?:\d{{4}}|{_MONTH})\b|'

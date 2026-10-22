@@ -29,6 +29,7 @@ class SummaryOutcome:
     evidence: tuple = ()
     packet_tokens: int = 0
     support_errors: tuple[str, ...] = ()
+    selection: str = 'primary'
 
 
 def source_metadata(source):
@@ -119,7 +120,8 @@ def audit_serialized_support(serialized, items, snapshot):
     return tuple(errors)
 
 
-def assemble_summary(collection, summary_plan, baseline, snapshot, *, limit, token_budget):
+def assemble_summary(collection, summary_plan, baseline, snapshot, *, limit, token_budget,
+                     compact=False, preferred=()):
     from app.service import SearchHit
     items = [e for e in collection.evidence if required_support_present(e, snapshot)]
     if not items or limit <= 0:
@@ -129,7 +131,9 @@ def assemble_summary(collection, summary_plan, baseline, snapshot, *, limit, tok
 
     rendered = {id(e): render_evidence_item(e, snapshot) for e in items}
     costs = {id(e): token_count(rendered[id(e)]) for e in items}
-    requirements = {r.key: r.label for r in collection.requirements or summary_plan.requirements}
+    declared = collection.requirements or summary_plan.requirements
+    requirements = {r.key: r.label for r in declared}
+    mandatory = {r.key for r in declared if getattr(r, 'mandatory', False)}
     found_counts = Counter(k for e in items for k in e.facets if k in requirements)
 
     def coverage(chosen):
@@ -140,12 +144,18 @@ def assemble_summary(collection, summary_plan, baseline, snapshot, *, limit, tok
 
     def render(chosen):
         rows = coverage(chosen)
-        lines = [header, *('[' + w + ']' for w in collection.warnings)]
+        lines = [('[抽取证据；未结构化原文适用性待核验]' if compact else header),
+                 *('[' + w + ']' for w in collection.warnings)]
         labels = {'emitted': '已输出', 'partial': '部分输出；预算未覆盖其余',
                   'omitted': '已找到但预算未覆盖', 'missing': '证据不足'}
-        lines.append('[候选证据覆盖：' + '；'.join(
-            f'{c.label} {c.emitted}/{c.found} {labels[c.status]}' for c in rows) + ']')
-        if len(chosen) < len(items):
+        if compact:
+            gaps = [f'{c.label}:{labels[c.status]}' for c in rows if c.status != 'emitted']
+            if gaps:
+                lines.append('[未完整覆盖：' + '；'.join(gaps) + ']')
+        else:
+            lines.append('[候选证据覆盖：' + '；'.join(
+                f'{c.label} {c.emitted}/{c.found} {labels[c.status]}' for c in rows) + ']')
+        if len(chosen) < len(items) and not compact:
             lines.append(f'[内容预算未覆盖 {len(items) - len(chosen)} 个完整证据单元；未宣称语义完整]')
         displayed = chosen
         if summary_plan.order == 'chronological':
@@ -176,11 +186,25 @@ def assemble_summary(collection, summary_plan, baseline, snapshot, *, limit, tok
 
     chosen = []
     pending = list(items)
+    # Reserve explicit evidence needs before broad category coverage. Every
+    # matching group is kept when it fits: one formula fragment cannot stand in
+    # for a separately encoded definition, example or exception. The collector
+    # handles alternative/duplicate support and atomic local dependencies.
+    for key in sorted(mandatory):
+        bundle = [e for e in pending if key in e.facets]
+        if bundle and packet_cost(make_hit(chosen + bundle)) <= token_budget:
+            chosen.extend(bundle)
+            pending = [e for e in pending if e not in bundle]
+    for item in preferred:
+        if item in pending and packet_cost(make_hit(chosen + [item])) <= token_budget:
+            chosen.append(item)
+            pending.remove(item)
     frequency = Counter(k for item in items for k in item.facets if k != 'overview')
     while pending:
         covered = set().union(*(e.facets for e in chosen)) if chosen else set()
         # 先补尚未覆盖的需求，再选低频信息；不以重复次数作为重要性。
         item = max(pending, key=lambda e: (
+            len(e.facets & mandatory),
             len((e.facets & requirements.keys()) - covered),
             sum(1 / frequency[k] for k in e.facets if k != 'overview' and k not in covered),
             bool(set(e.moments) - {t for c in chosen for t in c.moments}),
