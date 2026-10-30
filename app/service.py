@@ -212,6 +212,67 @@ class MemoryService:
             return f"[{role} | {when}]\n{raw}" if when else f"[{role}]\n{raw}"
         return f"[{role}]\n{raw}"
 
+    @staticmethod
+    def _structured_search_suffix(text: str) -> str:
+        """Index-only hints for structured benchmark memories; never returned as synthetic evidence."""
+        hints: list[str] = []
+        decoder = json.JSONDecoder()
+        for marker in re.finditer(r"Corpus:\s*", text):
+            start = marker.end()
+            brace = text.find("{", start)
+            if brace < 0:
+                continue
+            prefix = text[start:brace]
+            try:
+                payload, _ = decoder.raw_decode(text[brace:])
+            except ValueError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            subject = str(payload.get("subject") or "").strip()
+            relation = str(payload.get("relation") or "").strip()
+            obj = str(payload.get("object") or "").strip()
+            if subject and relation and obj:
+                operation = "update replace current" if "UPDATE" in prefix.upper() and "replace" in prefix.casefold() else "assert fact"
+                hints.append(
+                    "CorpusFact " + operation + " "
+                    f"subject={subject} relation={relation} object={obj} "
+                    f"subject_id={payload.get('subject_id') or ''} "
+                    f"relation_id={payload.get('relation_id') or ''} "
+                    f"object_id={payload.get('object_id') or ''}"
+                )
+
+        for label in ("Streaming intra-transfer train trajectory:", "Streaming online QA feedback:"):
+            if label not in text:
+                continue
+            raw = text.split(label, 1)[1].strip()
+            try:
+                payload = json.loads(raw)
+            except ValueError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            if "trajectory" in label:
+                feedback = payload.get("eval_feedback") if isinstance(payload.get("eval_feedback"), dict) else {}
+                metrics = feedback.get("metrics") if isinstance(feedback.get("metrics"), dict) else {}
+                reward = feedback.get("reward", metrics.get("score"))
+                hints.append(
+                    "StreamingTrajectory "
+                    f"dataset={payload.get('dataset') or ''} "
+                    f"task_index={payload.get('task_index') or ''} "
+                    f"reward={reward if reward is not None else ''} "
+                    "task index trajectory successful prior run"
+                )
+            else:
+                hints.append(
+                    "StreamingFeedback "
+                    f"qa_id={payload.get('qa_id') or ''} "
+                    f"score={payload.get('score') if payload.get('score') is not None else ''} "
+                    f"question={payload.get('question') or ''} "
+                    f"predicted_answer={payload.get('predicted_answer') or ''}"
+                )
+        return "\n".join(hints[:12])
+
     def add(
         self,
         request_id: str,
@@ -246,14 +307,15 @@ class MemoryService:
                 self._render_content(message, simple=bool(simple))
                 for message in raw_messages
             ]
-            search_texts = [
-                (
-                    f"{content}\n索引增强：{enrichment[index]}"
-                    if enrichment.get(index)
-                    else content
-                )
-                for index, content in enumerate(contents)
-            ]
+            search_texts = []
+            for index, content in enumerate(contents):
+                parts = [content]
+                if enrichment.get(index):
+                    parts.append(f"索引增强：{enrichment[index]}")
+                structured = self._structured_search_suffix(content)
+                if structured:
+                    parts.append(f"结构化索引：{structured}")
+                search_texts.append("\n".join(parts))
             embeddings = self.embedder.embed(search_texts)
             if embeddings.shape[0] != len(search_texts):
                 raise EmbeddingError("向量数量与待写入记忆数量不一致")
@@ -519,82 +581,71 @@ class MemoryService:
         scored.sort(key=lambda item: (-item[0], item[1].created_at, item[1].id))
 
 
+
     @staticmethod
-    def _stream_payload(record: StoredMemory) -> tuple[str, dict] | None:
-        for label in ("Streaming intra-transfer train trajectory:", "Streaming online QA feedback:"):
-            if label in record.content:
-                raw = record.content.split(label, 1)[1].strip()
-                try:
-                    payload = json.loads(raw)
-                except ValueError:
-                    return None
-                return label, payload if isinstance(payload, dict) else {}
-        return None
-
-    def _streaming_memory_hit(self, query: str, records: list[StoredMemory]) -> SearchHit | None:
-        query_fold = query.casefold()
-        query_tokens = _tokenize(query)
-        matches = []
-        task_match = re.search(r"\b(DB|ALF)\s+task\s+index\s+(\d+)\b", query, re.I)
-        for record in records:
-            item = self._stream_payload(record)
-            if item is None:
+    def _corpus_facts_from_text(text: str) -> list[dict[str, object]]:
+        decoder = json.JSONDecoder()
+        facts = []
+        for marker in re.finditer(r"Corpus:\s*", text):
+            start = marker.end()
+            brace = text.find("{", start)
+            if brace < 0:
                 continue
-            label, payload = item
-            kind = "trajectory" if "trajectory" in label else "feedback"
-            dataset = str(payload.get("dataset") or "").casefold()
-            task_index = payload.get("task_index")
-            question = str(payload.get("question") or "")
-            score = payload.get("score")
-            if isinstance(payload.get("eval_feedback"), dict):
-                score = payload["eval_feedback"].get("reward", payload["eval_feedback"].get("metrics", {}).get("score"))
-            ok = False
-            if task_match and kind == "trajectory":
-                ok = dataset == task_match.group(1).casefold()
-            elif question and (query_tokens & _tokenize(question)):
-                ok = True
-            elif "feedback" in query_fold or "task index" in query_fold:
-                ok = True
-            if not ok:
+            prefix = text[start:brace]
+            try:
+                payload, _ = decoder.raw_decode(text[brace:])
+            except ValueError:
                 continue
-            matches.append((kind, payload, record))
-        if not matches:
-            return None
-        lines = ["【流式记忆证据】以下为历史反馈/轨迹记录，供上下文学习；不是当前问题的最终答案。"]
-        for kind, payload, record in matches[:4]:
-            if kind == "trajectory":
-                feedback = payload.get("eval_feedback") if isinstance(payload.get("eval_feedback"), dict) else {}
-                reward = feedback.get("reward", feedback.get("metrics", {}).get("score") if isinstance(feedback.get("metrics"), dict) else None)
-                lines.append(f"- 轨迹：dataset={payload.get('dataset')} task_index={payload.get('task_index')} reward={reward} source={record.id}")
-                trajectory = payload.get("trajectory")
-                if isinstance(trajectory, list) and trajectory:
-                    snippets = []
-                    for step in trajectory[:3]:
-                        if isinstance(step, dict) and isinstance(step.get("content"), str):
-                            snippets.append(step["content"].replace("\n", " ")[:240])
-                    if snippets:
-                        lines.append("  片段：" + " / ".join(snippets))
-            else:
-                lines.append(f"- 反馈：qa_id={payload.get('qa_id')} score={payload.get('score')} source={record.id}")
-                if payload.get("question"):
-                    lines.append("  question=" + str(payload.get("question")).replace("\n", " ")[:240])
-                if payload.get("predicted_answer"):
-                    lines.append("  predicted_answer=" + str(payload.get("predicted_answer")).replace("\n", " ")[:200])
-        digest = hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()[:24]
-        return SearchHit(id=f"stream_{digest}", content="\n".join(lines), score=0.999,
-                         created_at=matches[0][2].created_at)
+            if not isinstance(payload, dict):
+                continue
+            subject = str(payload.get("subject") or "").strip()
+            relation = str(payload.get("relation") or "").strip()
+            obj = str(payload.get("object") or "").strip()
+            if subject and relation and obj:
+                facts.append({"subject": subject, "relation": relation, "object": obj,
+                              "update": "UPDATE" in prefix.upper() and "replace" in prefix.casefold()})
+        return facts
 
-    def _augment_structured_hits(
-        self, query: str, records: list[StoredMemory], hits: list[SearchHit], limit: int
-    ) -> list[SearchHit]:
-        # Only add narrow streaming hints. Synthetic kg_ summaries hurt smoke A/C,
-        # while stream_ hints helped transfer-style memory without broad result churn.
-        extras = [hit for hit in (self._streaming_memory_hit(query, records),) if hit is not None]
-        if not extras:
+    @staticmethod
+    def _rerank_structured_hits(query: str, hits: list[SearchHit]) -> list[SearchHit]:
+        parsed = [(index, hit, MemoryService._corpus_facts_from_text(hit.content))
+                  for index, hit in enumerate(hits)]
+        if not any(facts for _, _, facts in parsed):
             return hits
-        seen = {hit.id for hit in extras}
-        merged = extras + [hit for hit in hits if hit.id not in seen]
-        return merged[:limit]
+        query_tokens = _tokenize(query)
+        relation_words = {"author", "genre", "continent", "country", "citizenship", "language",
+                          "official", "ceo", "chief", "executive", "creator", "created", "music",
+                          "party", "political"}
+        if not (query_tokens & relation_words or any(facts for _, _, facts in parsed[:5])):
+            return hits
+
+        update_subjects = {fact["subject"].casefold() for _, _, facts in parsed for fact in facts if fact["update"]}
+        update_objects = {fact["object"].casefold() for _, _, facts in parsed for fact in facts if fact["update"]}
+
+        def touches_update_chain(facts: list[dict[str, object]]) -> bool:
+            for fact in facts:
+                subject = fact["subject"].casefold()
+                obj = fact["object"].casefold()
+                if subject in update_objects or obj in update_subjects or subject in update_subjects or obj in update_objects:
+                    return True
+            return False
+
+        def priority(item: tuple[int, SearchHit, list[dict[str, object]]]) -> tuple[int, int]:
+            index, hit, facts = item
+            if not facts:
+                return (4, index)
+            content = hit.content
+            update = any(fact["update"] for fact in facts)
+            overlap = bool(query_tokens & _tokenize(content))
+            if update and overlap:
+                return (0, index)
+            if update:
+                return (1, index)
+            if touches_update_chain(facts):
+                return (2, index)
+            return (3, index)
+
+        return [hit for _, hit, _ in sorted(parsed, key=priority)]
 
     def search(
         self,
@@ -765,8 +816,8 @@ class MemoryService:
                         self.settings.governance_mode, governance_plan.intent, len(snapshot.incomplete),
                         (time.perf_counter() - started) * 1000)
             if self.settings.governance_mode == "active":
-                return self._augment_structured_hits(query, records, governed[:limit], limit)
-        return self._augment_structured_hits(query, records, hits, limit)
+                return self._rerank_structured_hits(query, governed[:limit])
+        return self._rerank_structured_hits(query, hits)
 
     def search_simple(self, query: str) -> list[SearchHit]:
         return self.search(
