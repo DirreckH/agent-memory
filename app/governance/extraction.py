@@ -23,11 +23,18 @@ class FactIndexError(RuntimeError):
 @lru_cache(maxsize=1)
 def encoding():
     # 固定工程计数编码，并非所有提供方的实际计费 tokenizer。
-    return tiktoken.get_encoding("cl100k_base")
+    # 部署环境若缺少本地 tiktoken 词表，不应因为预热/预算估算阻断服务启动。
+    try:
+        return tiktoken.get_encoding("cl100k_base")
+    except Exception:  # noqa: BLE001 - 退化为保守字符估算
+        return None
 
 
 def token_count(text: str) -> int:
-    return len(encoding().encode(text, disallowed_special=()))
+    enc = encoding()
+    if enc is None:
+        return max(1, len(text) // 4)
+    return len(enc.encode(text, disallowed_special=()))
 
 
 def digest(text: str) -> str:

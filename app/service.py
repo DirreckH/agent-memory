@@ -127,7 +127,7 @@ class MemoryService:
 
     def initialize(self) -> None:
         self.store.initialize()
-        if self.settings.governance_mode != "off":
+        if self.settings.governance_mode != "off" and self.llm.enabled:
             from app.governance.extraction import encoding
             encoding()  # 预算计时前预热固定 tokenizer。
         deleted = self.store.prune_older_than(self.settings.data_retention_days)
@@ -282,7 +282,7 @@ class MemoryService:
                     )
                 )
             batch = None
-            if self.settings.governance_mode != "off":
+            if self.settings.governance_mode != "off" and self.llm.enabled:
                 from app.governance.extraction import FactIndexer, FactIndexLLM
                 from app.governance.models import Source
                 sources = [Source(r.id, r.raw_content, r.role, r.session_id, r.ordinal,
@@ -638,19 +638,25 @@ class MemoryService:
             scored = self._rank_strict_temporal_candidates(scored, window, ordering)
         else:
             self._sort_scored(scored, ordering)
-        if steps and context is None and len(scored) < limit:
-            scored = supplement_multihop(
-                steps=steps, records=records, baseline=scored,
-                step_vectors=step_vectors, score_record=score_record,
-                min_score=self.settings.min_relevance_score,
-                max_rounds=self.settings.multihop_max_rounds,
-                seed_limit=self.settings.multihop_seed_limit,
-                bridge_limit=self.settings.multihop_bridge_limit,
-                supplement_limit=self.settings.multihop_supplement_limit,
-                budget_seconds=self.settings.multihop_budget_seconds,
-                protected_prefix=limit,
-                context_radius=self.settings.multihop_context_radius,
+        if steps and context is None:
+            missing_slots = max(0, limit - len(scored))
+            reserved_slots = min(
+                self.settings.multihop_supplement_limit,
+                max(missing_slots, 1 if limit >= self.settings.multihop_min_top_k else 0, limit // 8),
             )
+            if reserved_slots:
+                scored = supplement_multihop(
+                    steps=steps, records=records, baseline=scored,
+                    step_vectors=step_vectors, score_record=score_record,
+                    min_score=self.settings.min_relevance_score,
+                    max_rounds=self.settings.multihop_max_rounds,
+                    seed_limit=self.settings.multihop_seed_limit,
+                    bridge_limit=self.settings.multihop_bridge_limit,
+                    supplement_limit=reserved_slots,
+                    budget_seconds=self.settings.multihop_budget_seconds,
+                    protected_prefix=max(0, limit - reserved_slots),
+                    context_radius=self.settings.multihop_context_radius,
+                )
         hits = [
             SearchHit(
                 id=record.id,

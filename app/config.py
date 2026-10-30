@@ -93,11 +93,11 @@ class Settings(BaseSettings):
     multihop_budget_seconds: float = Field(default=6.0, gt=0, le=30.0)
     multihop_min_top_k: int = Field(default=6, ge=1, le=100)
 
-    # 派生治理索引：默认不改变原有写入和检索，active 必须显式配置。
-    governance_mode: Literal["off", "shadow", "active"] = "off"
-    # F1 查询期覆盖：legacy=现有治理；shadow=对照但返回现有治理；active=显式启用。
+    # 派生治理索引：比赛默认启用；需要纯基础检索时可显式设为 off/shadow。
+    governance_mode: Literal["off", "shadow", "active"] = "active"
+    # F1 查询期覆盖：legacy=现有治理；shadow=对照但返回现有治理；active=启用完整覆盖。
     # 它不控制 D1 或索引写入，且受 GOVERNANCE_MODE 总开关约束。
-    f1_mode: Literal["legacy", "shadow", "active"] = "legacy"
+    f1_mode: Literal["legacy", "shadow", "active"] = "active"
     governance_strict_write: bool = False
     governance_input_tokens: int = Field(default=3000, ge=256, le=32000)
     governance_output_tokens: int = Field(default=4096, ge=256, le=16384)
