@@ -518,6 +518,172 @@ class MemoryService:
         # 确定性排序便于复核：分数优先，相同分数按时间与稳定 ID。
         scored.sort(key=lambda item: (-item[0], item[1].created_at, item[1].id))
 
+
+    @staticmethod
+    def _iter_corpus_facts(record: StoredMemory):
+        decoder = json.JSONDecoder()
+        text = record.content
+        for marker in re.finditer(r"Corpus:\s*", text):
+            start = marker.end()
+            brace = text.find("{", start)
+            if brace < 0:
+                continue
+            prefix = text[start:brace]
+            try:
+                payload, _ = decoder.raw_decode(text[brace:])
+            except ValueError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            subject = str(payload.get("subject") or "").strip()
+            relation = str(payload.get("relation") or "").strip()
+            obj = str(payload.get("object") or "").strip()
+            if not subject or not relation or not obj:
+                continue
+            key = (
+                str(payload.get("subject_id") or subject).casefold(),
+                str(payload.get("relation_id") or relation).casefold(),
+            )
+            yield {
+                "key": key,
+                "subject": subject,
+                "relation": relation,
+                "object": obj,
+                "subject_id": payload.get("subject_id"),
+                "relation_id": payload.get("relation_id"),
+                "object_id": payload.get("object_id"),
+                "update": "UPDATE" in prefix.upper() and "replace" in prefix.casefold(),
+                "source_id": record.id,
+                "created_at": record.created_at,
+            }
+
+    def _structured_corpus_hit(self, query: str, records: list[StoredMemory]) -> SearchHit | None:
+        facts = []
+        for record in records:
+            facts.extend(self._iter_corpus_facts(record))
+        if not facts:
+            return None
+        query_tokens = _tokenize(query)
+        relation_words = {"author", "genre", "continent", "country", "citizenship", "language",
+                          "official", "ceo", "chief", "executive", "creator", "created", "music"}
+        relevant = []
+        for fact in facts:
+            text = " ".join(str(fact.get(k) or "") for k in ("subject", "relation", "object"))
+            if query_tokens & _tokenize(text) or query_tokens & relation_words:
+                relevant.append(fact)
+        if not relevant:
+            return None
+        current: dict[tuple[str, str], dict[str, object]] = {}
+        history: dict[tuple[str, str], list[dict[str, object]]] = {}
+        # records are newest first; keep the first value as current, retain older values as history.
+        for fact in facts:
+            key = fact["key"]
+            if key not in current:
+                current[key] = fact
+            else:
+                history.setdefault(key, []).append(fact)
+        relevant_keys = {fact["key"] for fact in relevant}
+        # Include bridge facts whose subject/object touches a relevant fact, so multi-hop chains stay complete.
+        anchors = {str(f.get("subject")).casefold() for f in relevant} | {str(f.get("object")).casefold() for f in relevant}
+        for fact in facts:
+            if (str(fact.get("subject")).casefold() in anchors or str(fact.get("object")).casefold() in anchors):
+                relevant_keys.add(fact["key"])
+        current_items = [current[key] for key in current if key in relevant_keys]
+        if not current_items:
+            return None
+        current_items = current_items[:20]
+        lines = ["【结构化事实证据】以下事实来自写入的 Corpus JSON；UPDATE replace 已按当前值覆盖旧值。",
+                 "【当前事实】"]
+        for fact in current_items:
+            update = "；更新事实" if fact.get("update") else ""
+            lines.append(f"- {fact['subject']} --{fact['relation']}--> {fact['object']}（source={fact['source_id']}{update}）")
+        old_lines = []
+        for fact in current_items:
+            for old in history.get(fact["key"], [])[:3]:
+                old_lines.append(f"- 旧值：{old['subject']} --{old['relation']}--> {old['object']}（source={old['source_id']}）")
+        if old_lines:
+            lines.append("【被替换/历史事实】")
+            lines.extend(old_lines[:10])
+        digest = hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()[:24]
+        return SearchHit(id=f"kg_{digest}", content="\n".join(lines), score=1.0,
+                         created_at=current_items[0]["created_at"])
+
+    @staticmethod
+    def _stream_payload(record: StoredMemory) -> tuple[str, dict] | None:
+        for label in ("Streaming intra-transfer train trajectory:", "Streaming online QA feedback:"):
+            if label in record.content:
+                raw = record.content.split(label, 1)[1].strip()
+                try:
+                    payload = json.loads(raw)
+                except ValueError:
+                    return None
+                return label, payload if isinstance(payload, dict) else {}
+        return None
+
+    def _streaming_memory_hit(self, query: str, records: list[StoredMemory]) -> SearchHit | None:
+        query_fold = query.casefold()
+        query_tokens = _tokenize(query)
+        matches = []
+        task_match = re.search(r"\b(DB|ALF)\s+task\s+index\s+(\d+)\b", query, re.I)
+        for record in records:
+            item = self._stream_payload(record)
+            if item is None:
+                continue
+            label, payload = item
+            kind = "trajectory" if "trajectory" in label else "feedback"
+            dataset = str(payload.get("dataset") or "").casefold()
+            task_index = payload.get("task_index")
+            question = str(payload.get("question") or "")
+            score = payload.get("score")
+            if isinstance(payload.get("eval_feedback"), dict):
+                score = payload["eval_feedback"].get("reward", payload["eval_feedback"].get("metrics", {}).get("score"))
+            ok = False
+            if task_match and kind == "trajectory":
+                ok = dataset == task_match.group(1).casefold()
+            elif question and (query_tokens & _tokenize(question)):
+                ok = True
+            elif "feedback" in query_fold or "task index" in query_fold:
+                ok = True
+            if not ok:
+                continue
+            matches.append((kind, payload, record))
+        if not matches:
+            return None
+        lines = ["【流式记忆证据】以下为历史反馈/轨迹记录，供上下文学习；不是当前问题的最终答案。"]
+        for kind, payload, record in matches[:4]:
+            if kind == "trajectory":
+                feedback = payload.get("eval_feedback") if isinstance(payload.get("eval_feedback"), dict) else {}
+                reward = feedback.get("reward", feedback.get("metrics", {}).get("score") if isinstance(feedback.get("metrics"), dict) else None)
+                lines.append(f"- 轨迹：dataset={payload.get('dataset')} task_index={payload.get('task_index')} reward={reward} source={record.id}")
+                trajectory = payload.get("trajectory")
+                if isinstance(trajectory, list) and trajectory:
+                    snippets = []
+                    for step in trajectory[:3]:
+                        if isinstance(step, dict) and isinstance(step.get("content"), str):
+                            snippets.append(step["content"].replace("\n", " ")[:240])
+                    if snippets:
+                        lines.append("  片段：" + " / ".join(snippets))
+            else:
+                lines.append(f"- 反馈：qa_id={payload.get('qa_id')} score={payload.get('score')} source={record.id}")
+                if payload.get("question"):
+                    lines.append("  question=" + str(payload.get("question")).replace("\n", " ")[:240])
+                if payload.get("predicted_answer"):
+                    lines.append("  predicted_answer=" + str(payload.get("predicted_answer")).replace("\n", " ")[:200])
+        digest = hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()[:24]
+        return SearchHit(id=f"stream_{digest}", content="\n".join(lines), score=0.999,
+                         created_at=matches[0][2].created_at)
+
+    def _augment_structured_hits(
+        self, query: str, records: list[StoredMemory], hits: list[SearchHit], limit: int
+    ) -> list[SearchHit]:
+        extras = [hit for hit in (self._structured_corpus_hit(query, records),
+                                  self._streaming_memory_hit(query, records)) if hit is not None]
+        if not extras:
+            return hits
+        seen = {hit.id for hit in extras}
+        merged = extras + [hit for hit in hits if hit.id not in seen]
+        return merged[:limit]
+
     def search(
         self,
         query: str,
@@ -687,8 +853,8 @@ class MemoryService:
                         self.settings.governance_mode, governance_plan.intent, len(snapshot.incomplete),
                         (time.perf_counter() - started) * 1000)
             if self.settings.governance_mode == "active":
-                return governed[:limit]
-        return hits
+                return self._augment_structured_hits(query, records, governed[:limit], limit)
+        return self._augment_structured_hits(query, records, hits, limit)
 
     def search_simple(self, query: str) -> list[SearchHit]:
         return self.search(
