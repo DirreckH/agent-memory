@@ -12,6 +12,6 @@ data/
 .DS_Store
 docs/
 logs/
-
+traffic/
 # FastEmbed/ONNX Runtime may create this telemetry session marker on macOS.
 :memory:.ses
