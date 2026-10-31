@@ -366,6 +366,32 @@ class SQLiteMemoryStore:
             )
         return output
 
+    def fetch_transfer_trajectory(self, dataset: str, task_index: int, *, limit: int = 3) -> list[StoredMemory]:
+        """Read prior successful transfer trajectories across users for explicit DB/ALF task-index queries."""
+        dataset = dataset.upper()
+        if dataset not in {"DB", "ALF"}:
+            return []
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, content, search_text, embedding, embedding_dim,
+                       created_at, source_timestamp, request_id, session_id, ordinal
+                FROM memories
+                WHERE content LIKE ?
+                  AND content LIKE ?
+                  AND content LIKE ?
+                ORDER BY created_at DESC, id ASC
+                LIMIT ?
+                """,
+                (
+                    "%Streaming intra-transfer train trajectory:%",
+                    f'%"dataset": "{dataset}"%',
+                    f'%"task_index": {int(task_index)}%',
+                    limit,
+                ),
+            ).fetchall()
+        return self._decode_memories(rows)
+
     def count_by_user(self, user_id: str) -> int:
         with self._connect() as connection:
             row = connection.execute(

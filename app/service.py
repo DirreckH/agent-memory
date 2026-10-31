@@ -648,6 +648,23 @@ class MemoryService:
 
         return [hit for _, hit, _ in sorted(parsed, key=priority)]
 
+    def _transfer_trajectory_fallback(self, query: str, hits: list[SearchHit], limit: int) -> list[SearchHit]:
+        if hits or not self.settings.transfer_trajectory_fallback:
+            return hits
+        match = re.fullmatch(r"\s*(DB|ALF)\s+task\s+index\s+(\d+)\s*", query, re.I)
+        if not match:
+            return hits
+        records = self.store.fetch_transfer_trajectory(match.group(1).upper(), int(match.group(2)), limit=min(3, limit))
+        return [
+            SearchHit(
+                id=record.id,
+                content=record.content,
+                score=0.01,
+                created_at=record.created_at,
+            )
+            for record in records
+        ]
+
     def _audit_search_results(
         self, query: str, user_id: str, top_k: int, options: list[str] | None, hits: list[SearchHit]
     ) -> None:
@@ -855,10 +872,10 @@ class MemoryService:
                         self.settings.governance_mode, governance_plan.intent, len(snapshot.incomplete),
                         (time.perf_counter() - started) * 1000)
             if self.settings.governance_mode == "active":
-                final_hits = self._rerank_structured_hits(query, governed[:limit])
+                final_hits = self._transfer_trajectory_fallback(query, self._rerank_structured_hits(query, governed[:limit]), limit)
                 self._audit_search_results(query, user_id, top_k, options, final_hits)
                 return final_hits
-        final_hits = self._rerank_structured_hits(query, hits)
+        final_hits = self._transfer_trajectory_fallback(query, self._rerank_structured_hits(query, hits), limit)
         self._audit_search_results(query, user_id, top_k, options, final_hits)
         return final_hits
 

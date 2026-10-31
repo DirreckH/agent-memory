@@ -119,6 +119,9 @@ class Settings(BaseSettings):
     search_audit_top_k: int = Field(default=20, ge=1, le=100)
     search_audit_preview_chars: int = Field(default=240, ge=0, le=2000)
 
+    # 流式迁移样本：仅对显式 DB/ALF task index 查询，在当前用户无证据时读取历史成功轨迹。
+    transfer_trajectory_fallback: bool = True
+
     # 简化 /set、/get 接口没有 user_id，统一放入此本地隔离空间。
     local_user_id: str = Field(default="local-default", min_length=1, max_length=256)
     max_memory_chars: int = Field(default=200_000, ge=1, le=2_000_000)
