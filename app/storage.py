@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 import uuid
@@ -367,10 +368,12 @@ class SQLiteMemoryStore:
         return output
 
     def fetch_transfer_trajectory(self, dataset: str, task_index: int, *, limit: int = 3) -> list[StoredMemory]:
-        """Read prior successful transfer trajectories across users for explicit DB/ALF task-index queries."""
+        """Read cross-user transfer trajectories with an exact dataset/task-index match."""
         dataset = dataset.upper()
-        if dataset not in {"DB", "ALF"}:
+        if dataset not in {"DB", "ALF"} or limit <= 0:
             return []
+        marker = "Streaming intra-transfer train trajectory:"
+        output: list[StoredMemory] = []
         with self._connect() as connection:
             rows = connection.execute(
                 """
@@ -378,19 +381,27 @@ class SQLiteMemoryStore:
                        created_at, source_timestamp, request_id, session_id, ordinal
                 FROM memories
                 WHERE content LIKE ?
-                  AND content LIKE ?
-                  AND content LIKE ?
                 ORDER BY created_at DESC, id ASC
-                LIMIT ?
                 """,
-                (
-                    "%Streaming intra-transfer train trajectory:%",
-                    f'%"dataset": "{dataset}"%',
-                    f'%"task_index": {int(task_index)}%',
-                    limit,
-                ),
-            ).fetchall()
-        return self._decode_memories(rows)
+                (f"%{marker}%",),
+            )
+            for row in rows:
+                try:
+                    payload = json.loads(row["content"].partition(marker)[2])
+                except (json.JSONDecodeError, RecursionError):
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                source_dataset = payload.get("dataset")
+                source_index = payload.get("task_index")
+                if (not isinstance(source_dataset, str) or source_dataset.upper() != dataset
+                        or type(source_index) is not int or source_index != task_index):
+                    continue
+                # 错误候选和损坏记录不占返回名额；按原排序精确筛选后再限制数量。
+                output.extend(self._decode_memories([row]))
+                if len(output) >= limit:
+                    break
+        return output
 
     def count_by_user(self, user_id: str) -> int:
         with self._connect() as connection:
