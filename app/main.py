@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, status
 
 from app.config import Settings
 from app.embeddings import Embedder, build_embedder
-from app.input_log import InputLogMiddleware, build_input_logger
+from app.input_log import InputLogMiddleware, build_input_logger, build_search_audit_logger
 from app.llm import MemoryLLM, build_memory_llm
 from app.schemas import (
     CompetitionAddRequest,
@@ -84,6 +84,8 @@ def create_app(
             logger=build_input_logger(settings),
             max_chars=settings.input_log_max_chars,
         )
+    if settings.search_audit_enabled:
+        service.search_audit_logger = build_search_audit_logger(settings)
 
     def require_api_key(
         authorization: str | None = Header(default=None),

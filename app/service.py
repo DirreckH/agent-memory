@@ -123,6 +123,7 @@ class MemoryService:
         self.embedder = embedder
         self.llm = llm
         self.governance_retriever = governance_retriever
+        self.search_audit_logger: logging.Logger | None = None
         self._governance_diagnostics = threading.local()
 
     def initialize(self) -> None:
@@ -647,6 +648,44 @@ class MemoryService:
 
         return [hit for _, hit, _ in sorted(parsed, key=priority)]
 
+    def _audit_search_results(
+        self, query: str, user_id: str, top_k: int, options: list[str] | None, hits: list[SearchHit]
+    ) -> None:
+        if not self.settings.search_audit_enabled:
+            return
+        logger = self.search_audit_logger
+        if logger is None:
+            return
+        preview_chars = self.settings.search_audit_preview_chars
+        try:
+            record = {
+                "ts": utc_now_text(),
+                "query_hash": hashlib.sha256(query.encode("utf-8")).hexdigest()[:24],
+                "query_preview": query[:240],
+                "user_hash": hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:24],
+                "top_k": top_k,
+                "options_count": len(options or []),
+                "result_count": len(hits),
+                "results": [],
+            }
+            for rank, hit in enumerate(hits[: self.settings.search_audit_top_k], 1):
+                content = hit.content or ""
+                item = {
+                    "rank": rank,
+                    "id": hit.id,
+                    "prefix": hit.id.split("_", 1)[0] + "_" if "_" in hit.id else hit.id,
+                    "score": hit.score,
+                    "created_at": hit.created_at,
+                    "content_hash": hashlib.sha256(content.encode("utf-8")).hexdigest()[:24],
+                    "chars": len(content),
+                }
+                if preview_chars:
+                    item["preview"] = content.replace("\n", " ")[:preview_chars]
+                record["results"].append(item)
+            logger.info(json.dumps(record, ensure_ascii=False))
+        except Exception:  # noqa: BLE001 - 审计日志失败不得影响检索响应
+            pass
+
     def search(
         self,
         query: str,
@@ -816,8 +855,12 @@ class MemoryService:
                         self.settings.governance_mode, governance_plan.intent, len(snapshot.incomplete),
                         (time.perf_counter() - started) * 1000)
             if self.settings.governance_mode == "active":
-                return self._rerank_structured_hits(query, governed[:limit])
-        return self._rerank_structured_hits(query, hits)
+                final_hits = self._rerank_structured_hits(query, governed[:limit])
+                self._audit_search_results(query, user_id, top_k, options, final_hits)
+                return final_hits
+        final_hits = self._rerank_structured_hits(query, hits)
+        self._audit_search_results(query, user_id, top_k, options, final_hits)
+        return final_hits
 
     def search_simple(self, query: str) -> list[SearchHit]:
         return self.search(

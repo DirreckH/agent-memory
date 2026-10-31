@@ -113,6 +113,12 @@ class Settings(BaseSettings):
     input_log_path: Path = Path("data/logs/input.jsonl")
     input_log_max_chars: int = Field(default=20_000, ge=100, le=2_000_000)
 
+    # 检索审计日志：记录 /get 返回候选的 ID、分数、hash 与短预览，便于 smoke 后定位分项变化。
+    search_audit_enabled: bool = True
+    search_audit_path: Path = Path("data/logs/search_audit.jsonl")
+    search_audit_top_k: int = Field(default=20, ge=1, le=100)
+    search_audit_preview_chars: int = Field(default=240, ge=0, le=2000)
+
     # 简化 /set、/get 接口没有 user_id，统一放入此本地隔离空间。
     local_user_id: str = Field(default="local-default", min_length=1, max_length=256)
     max_memory_chars: int = Field(default=200_000, ge=1, le=2_000_000)

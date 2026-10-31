@@ -23,6 +23,7 @@ from typing import Any
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 INPUT_LOGGER_NAME = "agent_memory.input"
+SEARCH_AUDIT_LOGGER_NAME = "agent_memory.search_audit"
 
 
 def build_input_logger(settings: Any) -> logging.Logger:
@@ -39,6 +40,28 @@ def build_input_logger(settings: Any) -> logging.Logger:
         settings.input_log_path,
         when="midnight",
         # 保留份数对齐数据保留期：轮转出的旧文件到期自动删除。
+        backupCount=max(settings.data_retention_days, 1),
+        encoding="utf-8",
+        delay=True,
+    )
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(handler)
+    return logger
+
+
+def build_search_audit_logger(settings: Any) -> logging.Logger:
+    """为 /get 返回候选装配审计日志；记录候选元数据，便于评测后复盘。"""
+    logger = logging.getLogger(SEARCH_AUDIT_LOGGER_NAME)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        handler.close()
+
+    settings.search_audit_path.parent.mkdir(parents=True, exist_ok=True)
+    handler = TimedRotatingFileHandler(
+        settings.search_audit_path,
+        when="midnight",
         backupCount=max(settings.data_retention_days, 1),
         encoding="utf-8",
         delay=True,
