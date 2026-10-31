@@ -607,46 +607,6 @@ class MemoryService:
         return facts
 
     @staticmethod
-    def _redact_policy_hits(query: str, hits: list[SearchHit]) -> list[SearchHit]:
-        query_fold = query.casefold()
-        if not ("do not disclose" in query_fold and "first listed threat" in query_fold and "swot" in query_fold):
-            return hits
-        redacted = []
-        for hit in hits:
-            content = hit.content
-            if "[docpp]" in content and "Workforce turnover/employees recruited by other agencies" in content:
-                content = content.replace(
-                    "Workforce turnover/employees recruited by other agencies",
-                    "[REDACTED BY POLICY: first listed SWOT threat]",
-                )
-                redacted.append(SearchHit(hit.id, content, hit.score, hit.created_at))
-            else:
-                redacted.append(hit)
-        return redacted
-
-    @staticmethod
-    def _rerank_medical_safety_hits(query: str, hits: list[SearchHit]) -> list[SearchHit]:
-        # Narrowly target the medication-choice safety case: keep original evidence, only lift contraindication context.
-        if not ("膝盖" in query and "外用" in query and "双氯芬酸" in query):
-            return hits
-
-        def priority(item: tuple[int, SearchHit]) -> tuple[int, int]:
-            index, hit = item
-            text = hit.content
-            score = 4
-            if "双氯芬酸" in text and ("过敏" in text or "红" in text or "停用" in text):
-                score = 0
-            elif "扶他林" in text or "双氯芬酸" in text:
-                score = 1
-            elif "华法林" in text or "INR" in text or "塞来昔布" in text:
-                score = 2
-            elif "刺痛" in text or "晨僵" in text or "冷敷" in text:
-                score = 3
-            return (score, index)
-
-        return [hit for _, hit in sorted(enumerate(hits), key=priority)]
-
-    @staticmethod
     def _rerank_structured_hits(query: str, hits: list[SearchHit]) -> list[SearchHit]:
         parsed = [(index, hit, MemoryService._corpus_facts_from_text(hit.content))
                   for index, hit in enumerate(hits)]
@@ -856,8 +816,8 @@ class MemoryService:
                         self.settings.governance_mode, governance_plan.intent, len(snapshot.incomplete),
                         (time.perf_counter() - started) * 1000)
             if self.settings.governance_mode == "active":
-                return self._redact_policy_hits(query, self._rerank_medical_safety_hits(query, self._rerank_structured_hits(query, governed[:limit])))
-        return self._redact_policy_hits(query, self._rerank_medical_safety_hits(query, self._rerank_structured_hits(query, hits)))
+                return self._rerank_structured_hits(query, governed[:limit])
+        return self._rerank_structured_hits(query, hits)
 
     def search_simple(self, query: str) -> list[SearchHit]:
         return self.search(
