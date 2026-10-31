@@ -607,36 +607,6 @@ class MemoryService:
         return facts
 
     @staticmethod
-    def _demote_feedback_hits(query: str, hits: list[SearchHit]) -> list[SearchHit]:
-        query_fold = query.casefold()
-        if any(term in query_fold for term in ("feedback", "predicted_answer", "score", "qa_id")):
-            return hits
-        normal = [hit for hit in hits if "Streaming online QA feedback:" not in hit.content]
-        feedback = [hit for hit in hits if "Streaming online QA feedback:" in hit.content]
-        return normal + feedback
-
-    @staticmethod
-    def _rerank_document_policy_hits(query: str, hits: list[SearchHit]) -> list[SearchHit]:
-        query_fold = query.casefold()
-        if not ("swot" in query_fold and "threat" in query_fold):
-            return hits
-        if not any("[docpp]" in hit.content for hit in hits):
-            return hits
-
-        def priority(item: tuple[int, SearchHit]) -> tuple[int, int]:
-            index, hit = item
-            text = hit.content.casefold()
-            if "threats" in text and "legislature/legislative mandates" in text:
-                return (0, index)
-            if "threats" in text:
-                return (1, index)
-            if "legislature/legislative mandates" in text:
-                return (2, index)
-            return (3, index)
-
-        return [hit for _, hit in sorted(enumerate(hits), key=priority)]
-
-    @staticmethod
     def _rerank_structured_hits(query: str, hits: list[SearchHit]) -> list[SearchHit]:
         parsed = [(index, hit, MemoryService._corpus_facts_from_text(hit.content))
                   for index, hit in enumerate(hits)]
@@ -847,7 +817,7 @@ class MemoryService:
                         (time.perf_counter() - started) * 1000)
             if self.settings.governance_mode == "active":
                 return self._rerank_structured_hits(query, governed[:limit])
-        return self._demote_feedback_hits(query, self._rerank_document_policy_hits(query, self._rerank_structured_hits(query, hits)))
+        return self._rerank_structured_hits(query, hits)
 
     def search_simple(self, query: str) -> list[SearchHit]:
         return self.search(
